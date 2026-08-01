@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from assystant.cli import main as cli_main
@@ -57,10 +59,34 @@ def test_dry_run_renders_a_script_without_submitting(generated_campaign):
     assert " ." not in script.replace("00", "")  # no relative-path arguments
 
 
-def test_dry_run_does_not_record_the_config(generated_campaign):
-    cfg, _ = generated_campaign
-    submit_campaign(cfg, dry_run=True, submit_fn=Recorder(), queued_dirs=set())
-    assert not (cfg.root_path / "assystant_config.yaml").is_file()
+def test_dry_run_writes_the_config_so_the_rendered_script_is_runnable(generated_campaign):
+    """A dry-run script invokes `python -m assystant.runner --config <path> ...`.
+
+    If that config is never written, running the script by hand -- exactly
+    what --dry-run exists to let a user do before committing to the queue --
+    fails immediately with ConfigError: campaign config not found. Writing the
+    resolved config is inert (a YAML file, not a scheduler action), so
+    --dry-run can and should do it.
+    """
+    import re
+
+    from assystant.config import CampaignConfig
+
+    cfg, manifest = generated_campaign
+    stats = submit_campaign(cfg, dry_run=True, submit_fn=Recorder(), queued_dirs=set())
+
+    run_dir = cfg.root_path / "Fe" / manifest.iloc[0]["dirname"]
+    script = (run_dir / JOB_SCRIPT_NAME).read_text()
+    match = re.search(r"--config (\S+)", script)
+    assert match, "rendered script has no --config argument"
+    config_path = match.group(1)
+
+    assert config_path == str(cfg.root_path / "assystant_config.yaml")
+    assert Path(config_path).is_file(), "dry-run left a script whose --config path does not exist"
+    # And it is not just present but actually loadable, as `assystant.runner` would.
+    reloaded = CampaignConfig.from_yaml(config_path).resolve()
+    assert reloaded.incar["ENCUT"] == cfg.incar["ENCUT"]
+    assert stats["rendered"]
 
 
 def test_rendered_paths_are_all_absolute(generated_campaign):

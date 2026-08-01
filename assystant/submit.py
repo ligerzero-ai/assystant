@@ -212,13 +212,16 @@ def submit_campaign(
 
     ``queued_dirs`` and ``submit_fn`` are injection seams -- the defaults query
     ``squeue`` and call ``sbatch``; tests pass their own so no scheduler is
-    touched.  ``--dry-run`` skips the ``squeue`` query outright.
+    touched.  ``--dry-run`` skips the ``squeue`` query, but still writes the
+    resolved provenance config (:func:`guard_config` with ``write=True``): it
+    is inert -- a YAML file, not a scheduler action -- and without it a
+    rendered script's ``--config`` argument points at a file that does not
+    exist, so a user cannot run it by hand to test before committing to the
+    queue (which is exactly what ``--dry-run`` is for). The staleness check
+    itself already runs unconditionally, dry run or not, so writing afterwards
+    cannot mask a real conflict.
     """
-    config_path = guard_config(cfg, from_scratch=from_scratch, write=not dry_run)
-    if dry_run:
-        # Nothing is recorded on a dry run, so point the rendered script at where
-        # the config *will* live; a real run writes it before rendering.
-        config_path = recorded_config_path(cfg.root_path)
+    config_path = guard_config(cfg, from_scratch=from_scratch, write=True)
     if queued_dirs is None:
         queued_dirs = set() if dry_run else squeue_workdirs()
     submit_fn = submit_fn or _sbatch
