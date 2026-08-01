@@ -137,10 +137,19 @@ def _cmd_run(args) -> int:
         cfg, dry_run=args.dry_run, limit=args.limit, from_scratch=args.from_scratch
     )
     verb = "rendered" if args.dry_run else "submitted"
-    print(
+    message = (
         f"{verb} {len(stats['rendered']) if args.dry_run else stats['submitted']}, "
         f"skipped {stats['skipped_queued']} queued / {stats['skipped_done']} finished"
     )
+    if args.dry_run and args.from_scratch:
+        # A dry run never deletes: report what --from-scratch would wipe
+        # instead of silently omitting the most destructive part of what the
+        # real run would do.
+        message += (
+            f", would delete {stats['would_delete']} existing run_dir(s) "
+            "(not deleted -- dry run)"
+        )
+    print(message)
     return 0
 
 

@@ -253,6 +253,55 @@ def test_from_scratch_wipes_the_run_dir_including_the_cache(generated_campaign):
     assert len(recorder.calls) == 2, "--from-scratch must not skip finished structures"
 
 
+def test_dry_run_from_scratch_never_deletes_existing_run_dirs(generated_campaign):
+    """A dry run must never destroy data -- that is the whole contract of the flag.
+
+    ``--dry-run --from-scratch`` used to call ``shutil.rmtree`` unconditionally,
+    so a user previewing what ``--from-scratch`` would do could silently wipe a
+    finished result (potentially weeks of DFT compute) and its ISIF7 output.
+    Mirrors the exact reproduction: a run_dir holding a rendered script, a
+    finished ``df_ASSYST_jobs.pkl``, and an ISIF7 subdirectory.
+    """
+    cfg, manifest = generated_campaign
+    submit_campaign(cfg, submit_fn=Recorder(), queued_dirs=set())  # renders assystant_job.sh
+
+    run_dir = cfg.root_path / "Fe" / manifest.iloc[0]["dirname"]
+    (run_dir / RESULT_FILENAME).write_text("weeks of compute")
+    isif7 = run_dir / "ISIF7"
+    isif7.mkdir(exist_ok=True)
+    (isif7 / "OUTCAR").write_text("finished relaxation")
+    assert (run_dir / JOB_SCRIPT_NAME).is_file()
+
+    stats = submit_campaign(
+        cfg, dry_run=True, from_scratch=True, submit_fn=Recorder(), queued_dirs=set()
+    )
+
+    assert (run_dir / RESULT_FILENAME).is_file(), "dry-run --from-scratch deleted a finished result"
+    assert (run_dir / RESULT_FILENAME).read_text() == "weeks of compute"
+    assert isif7.is_dir() and (isif7 / "OUTCAR").is_file(), "dry-run --from-scratch deleted ISIF7"
+    assert (run_dir / JOB_SCRIPT_NAME).is_file(), "the script itself is still (re-)rendered"
+    # Both structures already have a run_dir (from the real submit_campaign
+    # call above), so both are reported as "would delete".
+    assert stats["would_delete"] == 2
+
+
+def test_real_from_scratch_still_wipes_the_run_dir(generated_campaign):
+    """Guard against the dry-run fix above over-correcting.
+
+    Real (non-dry) ``--from-scratch`` must still wipe: it exists to clear
+    executorlib's stale cache after a calculation-affecting config change.
+    """
+    cfg, manifest = generated_campaign
+    submit_campaign(cfg, submit_fn=Recorder(), queued_dirs=set())
+
+    run_dir = cfg.root_path / "Fe" / manifest.iloc[0]["dirname"]
+    (run_dir / RESULT_FILENAME).write_text("stale result")
+
+    submit_campaign(cfg, from_scratch=True, submit_fn=Recorder(), queued_dirs=set())
+
+    assert not (run_dir / RESULT_FILENAME).is_file(), "real --from-scratch must still wipe run_dir"
+
+
 def test_from_scratch_records_the_new_config(generated_campaign):
     from assystant.config import load_recorded_config
 
@@ -283,6 +332,38 @@ def test_cli_dry_run_renders_without_submitting(generated_campaign, tmp_path, mo
     script = cfg.root_path / "Fe" / manifest.iloc[0]["dirname"] / JOB_SCRIPT_NAME
     assert script.is_file()
     assert "rendered 2" in capsys.readouterr().out
+
+
+def test_cli_dry_run_from_scratch_reports_would_delete_without_deleting(
+    generated_campaign, tmp_path, monkeypatch, capsys
+):
+    """End-to-end: `assystant run --dry-run --from-scratch` must report what it
+    would wipe, and must not actually wipe it.
+    """
+    import yaml
+
+    import assystant.submit as submit_mod
+
+    cfg, manifest = generated_campaign
+    submit_campaign(cfg, submit_fn=Recorder(), queued_dirs=set())
+    run_dir = cfg.root_path / "Fe" / manifest.iloc[0]["dirname"]
+    (run_dir / RESULT_FILENAME).write_text("weeks of compute")
+
+    path = tmp_path / "camp.yaml"
+    path.write_text(yaml.safe_dump(cfg.dump()))
+
+    def explode(*args, **kwargs):  # pragma: no cover - must never run
+        raise AssertionError("the scheduler was contacted during --dry-run")
+
+    monkeypatch.setattr(submit_mod, "_sbatch", explode)
+    monkeypatch.setattr(submit_mod, "squeue_workdirs", explode)
+
+    assert cli_main(["run", str(path), "--dry-run", "--from-scratch"]) == 0
+    out = capsys.readouterr().out
+    # Both structures already have a run_dir from the real submit_campaign
+    # call above, so both are reported as "would delete".
+    assert "would delete 2" in out
+    assert (run_dir / RESULT_FILENAME).is_file(), "CLI dry-run --from-scratch deleted a finished result"
 
 
 def test_cli_reports_staleness_as_an_error_exit(generated_campaign, tmp_path, monkeypatch):

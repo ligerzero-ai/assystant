@@ -220,13 +220,23 @@ def submit_campaign(
     queue (which is exactly what ``--dry-run`` is for). The staleness check
     itself already runs unconditionally, dry run or not, so writing afterwards
     cannot mask a real conflict.
+
+    A dry run must never destroy data: ``--dry-run --from-scratch`` does NOT
+    delete anything (real ``--from-scratch`` normally wipes each run_dir in
+    full, including ``executorlib_cache`` and any finished result, to clear
+    stale cached results after a config change -- see below). Instead it
+    counts, in ``stats["would_delete"]``, the run_dirs that exist and would
+    have been wiped, so the summary can say so without touching them.
     """
     config_path = guard_config(cfg, from_scratch=from_scratch, write=True)
     if queued_dirs is None:
         queued_dirs = set() if dry_run else squeue_workdirs()
     submit_fn = submit_fn or _sbatch
 
-    stats = {"submitted": 0, "skipped_queued": 0, "skipped_done": 0, "missing": 0, "rendered": []}
+    stats = {
+        "submitted": 0, "skipped_queued": 0, "skipped_done": 0, "missing": 0,
+        "would_delete": 0, "rendered": [],
+    }
     submitted_total = 0
 
     for species in cfg.system.systems:
@@ -245,14 +255,25 @@ def submit_campaign(
                 stats["skipped_queued"] += 1
                 continue
             if from_scratch:
-                # Wipe the run_dir IN FULL, including executorlib_cache -- the
-                # cache is keyed on lexical path only, so leaving it would serve
-                # stale results after an INCAR change.
                 if run_dir.is_dir():
-                    shutil.rmtree(run_dir)
+                    if dry_run:
+                        # Report, don't destroy: a dry run must never delete
+                        # data, and finished DFT results can represent weeks
+                        # of compute.
+                        stats["would_delete"] += 1
+                    else:
+                        # Wipe the run_dir IN FULL, including executorlib_cache
+                        # -- the cache is keyed on lexical path only, so
+                        # leaving it would serve stale results after an INCAR
+                        # change.
+                        shutil.rmtree(run_dir)
             elif (run_dir / RESULT_FILENAME).is_file():
                 stats["skipped_done"] += 1
                 continue
+            # Harmless even when the dir already exists (dry-run --from-scratch
+            # above, or a re-rendered but not yet finished structure): this
+            # only ever creates an empty directory to hold the rendered
+            # script, never removes or overwrites prior contents.
             run_dir.mkdir(parents=True, exist_ok=True)
 
             script = render_sbatch(
