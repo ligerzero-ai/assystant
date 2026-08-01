@@ -258,6 +258,12 @@ class VaspConfig:
     custodian_python: Any = None
     modules: list = field(default_factory=lambda: ["intel/2024.0", "impi/2021.11", "mkl/2024.0"])
     max_errors: int = 10
+    #: MPI launcher placed before :attr:`binary`.  ``null`` means the SLURM
+    #: default, ``srun -c 1 -n <slurm.ntasks> --hint=nomultithread``.  Set it
+    #: explicitly to run outside an allocation -- ``"mpirun -n 1"`` for a local
+    #: smoke test, or ``""`` to invoke the binary with no launcher at all.
+    #: ``{ntasks}`` in the string is substituted with the effective task count.
+    launcher: Any = None
 
 
 @dataclass

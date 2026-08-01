@@ -76,13 +76,17 @@ def build_vasp_command(cfg: CampaignConfig, ntasks: int | None = None) -> str:
     """
     ntasks = int(cfg.slurm.ntasks if ntasks is None else ntasks)
     lines = [f"module load {module}" for module in (cfg.vasp.modules or [])]
-    srun = f"srun -c 1 -n {ntasks} --hint=nomultithread {cfg.vasp.binary}"
+    if cfg.vasp.launcher is None:
+        launcher = f"srun -c 1 -n {ntasks} --hint=nomultithread"
+    else:
+        launcher = str(cfg.vasp.launcher).format(ntasks=ntasks)
+    invocation = f"{launcher} {cfg.vasp.binary}".strip()
     if cfg.vasp.custodian:
         python = cfg.vasp.custodian_python or cfg.slurm.python_executable()
         lines.append(_CUSTODIAN_WRAPPER.format(max_errors=int(cfg.vasp.max_errors)))
-        lines.append(f"{python} custodian_vasp.py {srun} >> vasp.log")
+        lines.append(f"{python} custodian_vasp.py {invocation} >> vasp.log")
     else:
-        lines.append(f"{srun} >> vasp.log")
+        lines.append(f"{invocation} >> vasp.log")
     return "\n".join(lines)
 
 

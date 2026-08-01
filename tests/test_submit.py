@@ -87,6 +87,42 @@ def test_vasp_command_without_custodian_is_a_bare_srun(cfg):
     assert command.strip().endswith("srun -c 1 -n 64 --hint=nomultithread /opt/vasp/bin/vasp_std >> vasp.log")
 
 
+# -- vasp.launcher ----------------------------------------------------------
+def test_launcher_default_is_the_slurm_srun_form(cfg):
+    """`vasp.launcher: null` (the dataclass default) means SLURM's own srun."""
+    assert cfg.vasp.launcher is None
+    command = build_vasp_command(cfg.resolve({"vasp.custodian": False}))
+    lines = [line for line in command.splitlines() if "vasp_std" in line]
+    assert lines == ["srun -c 1 -n 64 --hint=nomultithread /opt/vasp/bin/vasp_std >> vasp.log"]
+
+
+def test_launcher_explicit_value_is_used_verbatim(cfg):
+    changed = cfg.resolve({"vasp.custodian": False, "vasp.launcher": "mpirun -n 1"})
+    command = build_vasp_command(changed)
+    lines = [line for line in command.splitlines() if "vasp_std" in line]
+    assert lines == ["mpirun -n 1 /opt/vasp/bin/vasp_std >> vasp.log"]
+    assert "srun" not in command
+
+
+def test_launcher_empty_string_yields_a_bare_binary_invocation(cfg):
+    changed = cfg.resolve({"vasp.custodian": False, "vasp.launcher": ""})
+    command = build_vasp_command(changed)
+    lines = [line for line in command.splitlines() if "vasp_std" in line]
+    assert lines == ["/opt/vasp/bin/vasp_std >> vasp.log"]
+    assert "srun" not in command
+
+
+def test_launcher_ntasks_placeholder_is_substituted(cfg):
+    changed = cfg.resolve({
+        "vasp.custodian": False,
+        "vasp.launcher": "mpirun -n {ntasks} --bind-to core",
+        "slurm.ntasks": 32,
+    })
+    command = build_vasp_command(changed)
+    lines = [line for line in command.splitlines() if "vasp_std" in line]
+    assert lines == ["mpirun -n 32 --bind-to core /opt/vasp/bin/vasp_std >> vasp.log"]
+
+
 def test_render_sbatch_honours_extra_directives_and_account(cfg, tmp_path):
     changed = cfg.resolve({"slurm.account": "pawsey0380",
                            "slurm.extra_directives": ["--reservation=benchmarking"]})
