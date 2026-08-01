@@ -1,0 +1,89 @@
+# A real, runnable ASSYST campaign: unary Fe, 1-12 atoms, all 230 spacegroups.
+#
+#   assystant gen    examples/Fe_unary.yaml
+#   assystant run    examples/Fe_unary.yaml --dry-run
+#   assystant run    examples/Fe_unary.yaml
+#   assystant status examples/Fe_unary.yaml --csv job_progress.csv
+#   assystant collect examples/Fe_unary.yaml -o Fe_unary_train.pkl
+#
+# To run several unaries in one campaign, make `species` a list of lists:
+#   species: [[La], [Ce], [Pr], [Nd]]
+# and leave `magmom.host` null so each system is its own host.
+
+root: /cmmc/ptmp/hmai/ASSYST_pyiwf/Unary
+
+system:
+  species: [Fe]
+  min_atoms: 1
+  max_atoms: 12
+  stoich_min: 1          # ignored for a unary system (see README)
+  stoich_max: 12
+  spacegroups: [1, 230]
+  strain_min: 0.8
+  strain_max: 1.2
+  eq_volume_source: EleBulk_MatProj_VorVol.csv   # bundled table; or an explicit {Fe: 11.8} map
+  perturb: 0.1           # symmetry-breaking displacement, applied at generation time
+  seed: null             # an integer here makes `gen` reproducible
+  n_jobs: null           # null -> os.cpu_count()
+
+incar:
+  ALGO: Normal
+  AMIX: 0.01
+  AMIX_MAG: 0.1
+  BMIX: 0.0001
+  BMIX_MAG: 0.0001
+  EDIFF: 1.0e-4
+  EDIFFG: 1.0e-4
+  ENCUT: 400
+  GGA: Pe
+  IBRION: 2
+  ISIF: 7
+  ISMEAR: 1
+  ISPIN: 2
+  ISTART: 0
+  KPAR: 4
+  LORBIT: 10
+  LPLANE: false
+  LREAL: false
+  NCORE: 4
+  NELM: 300
+  NSW: 500
+  PREC: Accurate
+  SIGMA: 0.2
+
+magmom:
+  host: null             # null -> the system's first species (Fe here)
+  host_moment: 3.0
+  solute_moment: -1.0
+
+assyst:
+  ionic_steps: 100       # applies to ALL THREE ISIF stages (7, 5, 2)
+  n_rattle: 5
+  n_stretch: 5
+  shear_strain: 0.8
+  triaxial_strain: 0.8
+  rattle_displacement: 0.1
+  rattle_strain: 0.05
+  core_overlap_tolerance: 0.3
+  image_selection_eVatom_threshold: -1   # -1 -> keep only the final relaxation image
+  compress_dirs: true
+  remove_calc_dirs: true
+
+filters:
+  min_dist: 1.0          # must be 1.0 -- see README
+  min_dist_backend: neighbor_list   # or `mic` to reproduce pre-2026 campaigns
+
+slurm:
+  partition: s.cmmg
+  ntasks: 64
+  cpus_per_task: 1
+  time: "48:00:00"
+  mem_per_cpu: 2000MB
+  env: /cmmc/ptmp/hmai/mambaforge/envs/assystant
+
+vasp:
+  binary: /cmmc/ptmp/hmai/vasp_compiled/intel_suite/vasp.6.4.3_intelsuite_march_znver4/bin/vasp_std
+  custodian: true
+  custodian_python: /cmmc/ptmp/hmai/mambaforge/envs/pymatgen/bin/python
+  modules: [intel/2024.0, impi/2021.11, mkl/2024.0]
+  max_errors: 10
