@@ -1,0 +1,136 @@
+assystant -- implementation report
+==================================
+Date:   2026-08-01
+Author: Han Lin Mai
+Repo:   /cmmc/u/hmai/pip_repos/assystant   (branch main; NOT pushed)
+Env:    /cmmc/ptmp/hmai/mambaforge/envs/assystant  (Python 3.12.13)
+Spec:   docs/2026_07_31_assystant_design.md
+
+STATUS: complete. 95 tests passing, 42/42 mutations caught, tree clean.
+
+COMMITS (all authored "Han Lin Mai")
+  de196e2  feat: campaign config, PyXtal generation and INCAR assembly
+  e7f23ce  feat: sbatch submission, in-job runner, status and collect, CLI
+  bb1b617  test: mutation-proven suite
+  3b90206  docs: README and a runnable example campaign
+  (base 304ddb4 "chore: initial repo with design and port logs")
+
+WHAT WAS BUILT
+  assystant/config.py    CampaignConfig + nested typed sections, dotted-path
+                         overrides, validation, canonical dump, staleness diff
+  assystant/generate.py  PyXtal scan, content hashing, POSCARs + manifest.csv
+  assystant/incar.py     stack_element_string / get_incar_magmom_string / build_incar
+  assystant/submit.py    sbatch rendering, squeue introspection, idempotent submit,
+                         staleness guard, --from-scratch wipe
+  assystant/runner.py    in-job entry point; assyst_kwargs mapping split out
+  assystant/status.py    per-system progress + job_progress-shaped CSV
+  assystant/collect.py   hashed + legacy layout walk, manifest join
+  assystant/cli.py       gen | run | status | collect  (argparse; entry point registered)
+  assystant/data/EleBulk_MatProj_VorVol.csv   bundled equilibrium-volume table
+  examples/Fe_unary.yaml, README.md, tests/ (7 files)
+
+  Deviation from the design's "Repo 3" file list: one extra module, runner.py.
+  The sbatch script needs something to invoke inside the allocation; putting it
+  in submit.py would mean importing the whole pyiron/VASP stack just to render
+  a script.
+
+VERIFIED END TO END (no VASP, no SLURM)
+  - `assystant gen` ran a real PyXtal scan for [[Fe], [Fe,C]] and wrote POSCARs
+    and manifest.csv.
+  - `assystant run --dry-run` rendered an sbatch script with absolute paths only.
+  - `assystant status` and `--csv` reproduced the job_progress.csv column shape.
+  - `assystant collect` joined results to the manifest on the structure hash.
+  - The staleness guard, driven through the CLI: identical config proceeds, a
+    changed incar.ENCUT exits 2 with the changed key named, a changed --time
+    proceeds (slurm is exempt).
+  - Seeded `gen` into two roots produced byte-identical POSCARs and the same
+    hash; unseeded produced different ones.
+
+THINGS FOUND WHILE PORTING (each verified against the library, not assumed)
+  1. SEEDING WAS INEFFECTIVE IN THE SOURCE NOTEBOOK. pyxtal 1.1.4 draws from its
+     own Generator and pymatgen's Structure.perturb calls
+     np.random.default_rng(seed=seed); neither reads numpy's global RNG. The
+     notebook's np.random.seed() therefore did not make generation reproducible.
+     Measured: np.random.seed alone -> two runs differ; random_state=s -> two
+     runs identical, and it dominates a differing np seed. Both are now threaded
+     explicitly, and np.random is still seeded for anything further down.
+  2. PERTURBATION MOVED FROM SUBMIT TIME TO GENERATION TIME. calculate_assyst.py
+     called struct.perturb(0.1) just before submitting, i.e. AFTER the POSCAR was
+     written. Under content-hashed directories that would mean the hash naming a
+     directory did not describe the geometry calculated in it. Now applied in
+     `gen` (system.perturb, default 0.1).
+  3. #SBATCH --chdir IS LOAD-BEARING, not cosmetic. The idempotency skip matches
+     `squeue -o %Z`, which reports the job's working directory. The old scripts
+     got that from os.chdir before sbatch; with os.chdir banned, --chdir is what
+     keeps the skip working.
+  4. MANIFEST DTYPES had to be pinned on re-read: a unary composition "2" comes
+     back from read_csv as int 2, which broke the round trip and would have
+     broken the collect join for all-digit hashes.
+  5. A SILENT "0 structures" IS UNDIAGNOSABLE. Most (spacegroup, composition)
+     pairs legitimately fail with pyxtal's Comp_CompatibilityError, and the
+     ported code swallowed every exception identically. `gen` now prints a tally
+     by exception class, so a real bug does not look like ordinary infeasibility.
+
+DELIBERATE BEHAVIOUR CHANGES (documented in the README)
+  - MAGMOM is written only when ISPIN == 2; the old scripts wrote it regardless,
+    which made a nonmagnetic INCAR read as magnetic.
+  - `system.species` accepts a list of lists, so one campaign covers many
+    systems. This is what replaces submit_temp.sh's one line per element.
+  - The staleness comparison excludes the `slurm` section. Including it would
+    make a --time bump demand --from-scratch, which DELETES run directories.
+
+CONSTRAINTS FROM THE BRIEF, HONOURED
+  - files_to_be_deleted is never passed anywhere (test_runner.py guards it;
+    mutation M28 confirms the guard is load-bearing).
+  - n_rattle == 0 and n_stretch == 0 is rejected in config validation with a
+    message naming the YAML keys and citing pyiron/pyiron_workflow#915.
+  - ionic_steps is passed through unmodified and applies to all three ISIF
+    stages; nothing tries to make it ISIF7-only.
+  - No os.chdir anywhere in the package (grep-clean); every rendered path absolute.
+
+TESTING -- MUTATION PROOF
+  95 tests. A harness applied 42 mutations one at a time, running a targeted
+  selection for each: apply -> require FAIL -> restore -> require PASS.
+  Final sweep: 42/42 caught. Coverage of the brief's minimum list:
+    composition enumeration unary + multi-component  M01, M02, M03
+    content hash (same -> same dir, different -> different)  M04, M05, M06
+    config parsing / override precedence / staleness  M08-M14
+    run --dry-run renders without submitting  M15, M16, M20, M21
+    collect reads hashed AND legacy layouts  M07, M24, M25, M26, M27
+
+  TWO MUTATIONS INITIALLY SURVIVED. Both were real defects in the tests, and
+  both are exactly the "asserts something that cannot fail" pattern:
+    M35: the seeded-generation test used spacegroup 229 with 2 atoms. There the
+         Wyckoff positions are fixed and adjust_volume_per_atom clamps the cell
+         to a band edge, so two UNSEEDED runs frequently coincide -- the test
+         passed with the seed removed. It was also flaky for the same reason.
+         Rewritten to spacegroup 1 with 4 free coordinates; re-verified over
+         three repeat sweeps.
+    M39: the CSV test asserted minutes_completed == str(MINUTES_PER_JOB),
+         importing the same constant the code uses, so it passed for any value.
+         Now asserts the literal 15.
+  Harness kept at (scratch) mutate.py; it is not part of the repo.
+
+CONCERNS / NOT DONE
+  1. NO REAL VASP RUN. The graph was never executed end to end from assystant --
+     that needs a VASP allocation. What is proven is that assyst_kwargs matches
+     inspect.signature(run_ASSYST_on_structure) exactly, including all required
+     parameters. The first real campaign should start with --limit 1.
+  2. executorlib's SLURM cache behaviour is unproven on this cluster (a risk the
+     design already records). If the cache misbehaves the design degrades to
+     today's behaviour (restart from ISIF7) rather than breaking.
+  3. filters.min_dist is not plumbable. run_ASSYST_on_structure 0.2.0 hardcodes
+     the 1.0 A floor. The key is kept for provenance and REJECTED if changed
+     rather than silently ignored. If it is ever wanted, it needs a parameter
+     added upstream in pyiron_workflow_assyst.
+  4. vasp.custodian_python defaults to slurm.env, whose environment may not have
+     custodian importable. The example YAML points it at .../envs/pymatgen. This
+     is not validated at submit time (the check would have to run inside the
+     allocation), so a wrong value surfaces as a failed job, not a failed submit.
+  5. MINUTES_PER_JOB = 15 is inherited verbatim from the existing
+     job_progress.csv (job_count * 15). It is a nominal figure, not a measurement.
+  6. `status --watch` is the one code path with no test (it loops on sleep).
+  7. Campaign-scale performance untested: `run` iterates the manifest serially
+     and renders one script per structure. For ~24,000 structures that is
+     ~24,000 small file writes plus one sbatch each; fine, but it has only been
+     exercised at single-digit scale.
