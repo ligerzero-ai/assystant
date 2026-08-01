@@ -21,7 +21,7 @@ def campaign_dict(tmp_path):
             "spacegroups": [1, 5],
             "seed": 7,
         },
-        "incar": {"ENCUT": 400, "ISPIN": 2, "SIGMA": 0.2, "ISIF": 7, "NSW": 500},
+        "incar": {"ENCUT": 400, "ISPIN": 2, "SIGMA": 0.2, "ISIF": 7, "NSW": 500, "IBRION": 2},
         "magmom": {"host": None, "host_moment": 3.0, "solute_moment": -1.0},
         "assyst": {"ionic_steps": 100, "n_rattle": 5, "n_stretch": 5},
         "filters": {"min_dist": 1.0, "min_dist_backend": "neighbor_list"},

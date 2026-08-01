@@ -10,6 +10,7 @@ from assystant.config import (
     CampaignConfig,
     ConfigError,
     StaleConfigError,
+    _validate_ibrion,
     config_differences,
     load_recorded_config,
     recorded_config_path,
@@ -73,6 +74,48 @@ def test_min_dist_other_than_one_is_rejected(campaign_dict):
     campaign_dict["filters"]["min_dist"] = 0.7
     with pytest.raises(ConfigError, match="min_dist"):
         CampaignConfig.from_dict(campaign_dict).resolve()
+
+
+# -- IBRION / relaxation validation ---------------------------------------
+def test_missing_ibrion_is_rejected_when_a_relaxation_will_run(campaign_dict):
+    """No IBRION + NSW>0 (from ionic_steps) is always wrong -- VASP defaults to
+    IBRION=0 (MD), which then refuses the job outright over a missing POTIM.
+    Catch it at config-load time instead of after the job reaches the queue.
+    """
+    del campaign_dict["incar"]["IBRION"]
+    with pytest.raises(ConfigError, match="IBRION"):
+        CampaignConfig.from_dict(campaign_dict).resolve()
+
+
+def test_ibrion_zero_without_potim_is_rejected(campaign_dict):
+    campaign_dict["incar"]["IBRION"] = 0
+    with pytest.raises(ConfigError, match="POTIM"):
+        CampaignConfig.from_dict(campaign_dict).resolve()
+
+
+def test_ibrion_zero_with_potim_is_accepted(campaign_dict):
+    campaign_dict["incar"]["IBRION"] = 0
+    campaign_dict["incar"]["POTIM"] = 0.5
+    cfg = CampaignConfig.from_dict(campaign_dict).resolve()
+    assert cfg.incar["IBRION"] == 0
+    assert cfg.incar["POTIM"] == 0.5
+
+
+def test_ibrion_two_is_accepted(campaign_dict):
+    campaign_dict["incar"]["IBRION"] = 2
+    assert "POTIM" not in campaign_dict["incar"]
+    cfg = CampaignConfig.from_dict(campaign_dict).resolve()
+    assert cfg.incar["IBRION"] == 2
+
+
+def test_ibrion_check_is_skipped_when_ionic_steps_is_zero():
+    """No relaxation stage runs at ionic_steps == 0, so an absent IBRION is fine.
+
+    (``assyst.ionic_steps`` itself is separately floored at >= 1 by
+    ``CampaignConfig.validate``, so this exercises the helper directly rather
+    than through a full campaign config.)
+    """
+    _validate_ibrion({}, 0)  # must not raise
 
 
 @pytest.mark.parametrize(

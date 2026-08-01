@@ -395,6 +395,8 @@ class CampaignConfig:
                 "NoPermutationsGeneratedError. Set at least one of them to >= 1."
             )
 
+        _validate_ibrion(self.incar, a.ionic_steps)
+
         if f.min_dist_backend not in ("neighbor_list", "mic"):
             raise ConfigError(
                 f"`filters.min_dist_backend` must be 'neighbor_list' or 'mic', "
@@ -457,6 +459,48 @@ class CampaignConfig:
 def system_name(species) -> str:
     """Directory name for a system: ``Fe``, ``Fe_C``, ``Fe_B_C``."""
     return "_".join(species)
+
+
+def _validate_ibrion(incar: dict, ionic_steps: int) -> None:
+    """Reject an INCAR that would let VASP default IBRION to 0 (MD) mid-relaxation.
+
+    ``run_ASSYST_on_structure`` sets ``NSW=ionic_steps`` for its three relaxation
+    stages, so whenever a relaxation actually runs (``ionic_steps > 0``) an
+    unset IBRION is always wrong: VASP defaults it to 0 (molecular dynamics),
+    which additionally requires POTIM and refuses to start without it --
+
+        Fatal error! IBRION=0, but no entry for POTIM on file INCAR. MUST be
+        specified!
+        ----> I REFUSE TO CONTINUE WITH THIS SICK JOB ... BYE!!! <----
+
+    catching that here, at config-load/submit time, avoids burning a queued
+    SLURM job to discover it. The pre-port production INCAR
+    (``calculate_assyst.py``) always set ``IBRION: 2`` explicitly; this only
+    enforces what every real ASSYST campaign has already done. Deliberately no
+    auto-default: injecting a physics choice into someone's INCAR silently is a
+    worse failure mode than an explicit, actionable error.
+    """
+    if ionic_steps <= 0:
+        return
+    if "IBRION" not in incar:
+        raise ConfigError(
+            "`incar` has no IBRION set, but `assyst.ionic_steps` "
+            f"({ionic_steps}) means run_ASSYST_on_structure's relaxation stages "
+            "run with NSW > 0. VASP defaults an unset IBRION to 0 (molecular "
+            "dynamics), which additionally requires POTIM and is never what an "
+            "ASSYST relaxation wants -- VASP itself refuses the job with "
+            "'Fatal error! IBRION=0, but no entry for POTIM on file INCAR. MUST "
+            "be specified!'. Set `incar.IBRION: 2` (conjugate-gradient "
+            "relaxation -- what ASSYST campaigns have always used)."
+        )
+    if int(incar["IBRION"]) == 0 and "POTIM" not in incar:
+        raise ConfigError(
+            "`incar.IBRION` is 0 (molecular dynamics) but `incar` has no "
+            "POTIM. VASP itself refuses this: 'Fatal error! IBRION=0, but no "
+            "entry for POTIM on file INCAR. MUST be specified!'. Set "
+            "`incar.POTIM`, or use `incar.IBRION: 2` for a standard ASSYST "
+            "relaxation."
+        )
 
 
 def _validate_symbols(systems) -> None:
