@@ -149,6 +149,20 @@ def test_launcher_ntasks_placeholder_is_substituted(cfg):
     assert lines == ["mpirun -n 32 --bind-to core /opt/vasp/bin/vasp_std >> vasp.log"]
 
 
+def test_get_user_env_directive_takes_no_argument(cfg, tmp_path):
+    """`--get-user-env=L` (inherited from the pre-2026 scripts) is rejected by
+    Slurm 25.11 with "option '--get-user-env' doesn't allow an argument", and
+    sbatch exits 255 -- so every real submission fails. Only the bare flag is
+    accepted. No injected `submit_fn` can catch this, because the tests never
+    invoke sbatch; it has to be pinned on the rendered text."""
+    script = render_sbatch(
+        cfg, run_dir=tmp_path / "d", poscar=tmp_path / "p.vasp", system="Fe",
+        job_name="j", config_path=tmp_path / "c.yaml",
+    )
+    assert "#SBATCH --get-user-env\n" in script
+    assert "--get-user-env=" not in script
+
+
 def test_render_sbatch_honours_extra_directives_and_account(cfg, tmp_path):
     changed = cfg.resolve({"slurm.account": "pawsey0380",
                            "slurm.extra_directives": ["--reservation=benchmarking"]})

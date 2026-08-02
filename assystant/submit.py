@@ -113,7 +113,12 @@ def render_sbatch(
         f"#SBATCH --chdir={run_dir}",
         f"#SBATCH --output={run_dir / 'assystant.out'}",
         f"#SBATCH --error={run_dir / 'assystant.err'}",
-        "#SBATCH --get-user-env=L",
+        # No `=L`. The pre-2026 scripts all wrote `--get-user-env=L`, which
+        # older Slurm accepted; Slurm 25.11 rejects the argument outright --
+        # "sbatch: option '--get-user-env' doesn't allow an argument" -- and
+        # sbatch exits 255, so every submission fails. The bare flag is what
+        # current Slurm documents ("load environment from local cluster").
+        "#SBATCH --get-user-env",
         f"#SBATCH --mem-per-cpu={cfg.slurm.mem_per_cpu}",
         "#SBATCH --hint=nomultithread",
     ]
