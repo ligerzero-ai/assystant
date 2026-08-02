@@ -1,0 +1,54 @@
+# Login-node smoke test: proves the whole chain runs real DFT, without SLURM.
+#
+#   assystant gen Fe_smoke.yaml --no-progress
+#   assystant run Fe_smoke.yaml --dry-run --limit 1
+#   bash <root>/Fe/struct_00000_*/assystant_job.sh
+#
+# Takes well under a minute and ends with
+#   ASSYST finished: 4 rows -> .../df_ASSYST_jobs.pkl
+#
+# THESE SETTINGS ARE NOT PHYSICS. ENCUT 200 / PREC Low / NELM 12 / 2 ionic steps
+# exist to make the chain finish fast enough to be a test. See docs/operations.md
+# ("Smoke testing without a scheduler") for why `modules`, `launcher` and
+# `custodian` are set the way they are.
+
+root: /cmmc/ptmp/hmai/assystant_smoke/campaign
+
+system:
+  species: [Fe]
+  min_atoms: 2
+  max_atoms: 2
+  spacegroups: [1, 2]
+  seed: 11
+  n_jobs: 1
+
+incar:
+  ENCUT: 200
+  PREC: Low
+  ISPIN: 1
+  IBRION: 2
+  POTIM: 0.3
+  ISMEAR: 1
+  SIGMA: 0.2
+  NELM: 12
+  KSPACING: 0.8
+  LWAVE: false
+  LCHARG: false
+  LREAL: Auto
+
+assyst:
+  ionic_steps: 2
+  n_rattle: 1
+  n_stretch: 1
+
+slurm:
+  partition: s.cmmg
+  ntasks: 1
+  time: "00:20:00"
+  env: /cmmc/ptmp/hmai/mambaforge/envs/assystant
+
+vasp:
+  binary: /cmmc/ptmp/hmai/vasp_compiled/intel_suite/vasp.6.4.3_intelsuite_march_znver4/bin/vasp_std
+  custodian: false               # no custodian needed to test the invocation
+  launcher: "env I_MPI_FABRICS=shm"   # replaces srun; avoids the OFI provider search
+  modules: []                    # site impi would demand a PMI2 server

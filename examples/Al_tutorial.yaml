@@ -1,0 +1,53 @@
+# A small but complete ASSYST campaign: unary Al, 1-4 atoms, cubic spacegroups.
+# Small enough to finish in minutes; every other campaign is this file with
+# bigger numbers.  Walked through step by step in docs/worked-example.md.
+#
+#   assystant gen     examples/Al_tutorial.yaml --no-progress
+#   assystant run     examples/Al_tutorial.yaml --dry-run --limit 1
+#   assystant run     examples/Al_tutorial.yaml --limit 4
+#   assystant status  examples/Al_tutorial.yaml
+#   assystant collect examples/Al_tutorial.yaml -o Al_tutorial_train.pkl
+#
+# ENCUT/PREC here are tutorial-grade, not production-grade; see Fe_unary.yaml.
+
+root: /cmmc/ptmp/hmai/assystant_tutorial/campaign
+
+system:
+  species: [Al]
+  min_atoms: 1
+  max_atoms: 4
+  spacegroups: [195, 230]
+  strain_min: 0.9
+  strain_max: 1.1
+  seed: 20260802         # an integer here makes `gen` reproducible
+
+incar:
+  ALGO: Fast
+  EDIFF: 1.0e-4
+  ENCUT: 300
+  IBRION: 2              # REQUIRED whenever assyst.ionic_steps > 0
+  ISIF: 7
+  ISMEAR: 1
+  ISPIN: 1
+  KSPACING: 0.5          # relaxation stages only; the statics force 0.25
+  LREAL: false
+  NELM: 60
+  NSW: 50                # never used -- assyst.ionic_steps overrides it
+  PREC: Normal
+  SIGMA: 0.2
+
+assyst:
+  ionic_steps: 20
+  n_rattle: 1
+  n_stretch: 1
+
+slurm:
+  partition: s.cmmg
+  ntasks: 8
+  time: "01:00:00"
+  env: /cmmc/ptmp/hmai/mambaforge/envs/assystant
+
+vasp:
+  binary: /cmmc/ptmp/hmai/vasp_compiled/intel_suite/vasp.6.4.3_intelsuite_march_znver4/bin/vasp_std
+  custodian: true
+  custodian_python: /cmmc/ptmp/hmai/mambaforge/envs/pymatgen/bin/python
