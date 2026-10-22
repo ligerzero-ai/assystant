@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "assystant"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Command-line driver for ASSYST campaigns: PyXtal generation -> per-structure DFT on SLURM -> collated training dataset"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -38,6 +38,9 @@ dev = ["pytest>=6.0", "pytest-cov>=2.0"]
 
 [project.scripts]
 assystant = "assystant.cli:main"
+
+[tool.hatch.version]
+path = "assystant/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["assystant"]
