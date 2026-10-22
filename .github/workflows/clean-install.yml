@@ -6,9 +6,6 @@
 # NOTE: this stays red until pyiron_workflow_vasp 0.2.0 and
 # pyiron_workflow_assyst 0.2.0 are published on PyPI -- before that the
 # `pyiron_workflow_assyst>=0.2.0` requirement cannot resolve.
-#
-# Python 3.13 is left out of the matrix until pyiron_workflow_vasp lifts its
-# `requires-python <3.13`.
 
 name: clean-install
 
@@ -21,8 +18,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -42,12 +37,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
         source: [wheel, sdist]
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}

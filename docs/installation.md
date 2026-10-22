@@ -7,7 +7,7 @@ python -m pip install assystant
 assystant --help
 ```
 
-in any fresh Python 3.11/3.12 environment — see
+in any fresh Python 3.11–3.13 environment — see
 [below](#building-an-environment-from-scratch) for venv, uv, conda and pixi, and
 for the [pre-release caveat](#before-the-dependencies-are-on-pypi).
 
@@ -33,8 +33,8 @@ works fine and is what the examples do:
 
 ## Building an environment from scratch
 
-`assystant` is a normal Python package. In a fresh environment with Python 3.11
-or 3.12, one command installs it and everything it needs:
+`assystant` is a normal Python package. In a fresh environment with Python 3.11,
+3.12 or 3.13, one command installs it and everything it needs:
 
 ```bash
 python -m pip install assystant
@@ -62,8 +62,8 @@ pixi add python=3.12
 pixi add --pypi assystant
 ```
 
-Python 3.13 is allowed by `assystant` itself but not yet by
-`pyiron_workflow_vasp` (`requires-python <3.13`), so `pip` refuses it.
+Python 3.13 needs `pyiron_workflow_vasp` 0.2.0 or later, the first release
+declaring `requires-python <3.14`; with 0.1.x `pip` refuses 3.13.
 
 What gets pulled in:
 

@@ -44,7 +44,7 @@ Background: [design spec](docs/2026_07_31_assystant_design.md) ·
 python -m pip install assystant
 ```
 
-Python 3.11–3.12. No `--no-build-isolation`, no pre-installed scientific stack:
+Python 3.11–3.13. No `--no-build-isolation`, no pre-installed scientific stack:
 `pip`, `uv pip install assystant`, a `venv`, a conda/mamba env or a pixi project
 all work the same way. See [installation](docs/installation.md) for each variant,
 the POTCAR configuration and what a real run additionally needs (SLURM, a VASP
