@@ -3,17 +3,77 @@
 # wheel in isolation, install each into an empty venv from outside the
 # checkout, then run the CLI and the test suite against the installed copy.
 #
-# NOTE: this stays red until pyiron_workflow_vasp 0.2.0 and
-# pyiron_workflow_assyst 0.2.0 are published on PyPI -- before that the
-# `pyiron_workflow_assyst>=0.2.0` requirement cannot resolve.
+# Upstream requirements that are not released yet are built as release
+# candidates by the `upstream` job (see there).
 
 name: clean-install
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
+  # Release candidates for upstream packages that are not on PyPI yet.
+  # For each requirement below, if PyPI already satisfies it nothing is built
+  # and the install jobs test against the published release. Otherwise a wheel
+  # is built from the upstream pull request that prepares that release (the
+  # same way its release workflow will build it) and handed to the install
+  # jobs via --find-links. Once the releases are out this job is a no-op and
+  # the CANDIDATES entries can be deleted.
+  upstream:
+    runs-on: ubuntu-latest
+    env:
+      # requirement | GitHub repo | git ref | versioneer tag to stamp (or "-")
+      CANDIDATES: |
+        pyiron_workflow_vasp>=0.2.0,<0.3 | pyiron/pyiron_workflow_vasp | pull/7/head | pyiron_workflow_vasp-0.2.0
+        pyiron_workflow_assyst>=0.2.0,<0.3 | ligerzero-ai/pyiron_workflow_assyst | pull/2/head | -
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheels for unreleased upstream requirements
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build pyyaml==6.0.1 toml==0.10.2
+          WH="$RUNNER_TEMP/wheelhouse"; mkdir -p "$WH"
+          while IFS='|' read -r req repo ref tag; do
+            req=$(echo "$req" | xargs); repo=$(echo "$repo" | xargs)
+            ref=$(echo "$ref" | xargs); tag=$(echo "$tag" | xargs)
+            [ -z "$req" ] && continue
+            if python -m pip download -q --no-deps -d "$RUNNER_TEMP/probe" "$req" 2>/dev/null; then
+              echo "::notice::$req is on PyPI; testing against the release"
+              continue
+            fi
+            echo "::warning::$req is not on PyPI yet; building a candidate from $repo@$ref"
+            src="$RUNNER_TEMP/src-${repo##*/}"
+            git clone -q "https://github.com/$repo" "$src"
+            git -C "$src" fetch -q origin "$ref"
+            git -C "$src" checkout -q FETCH_HEAD
+            if [ "$tag" != "-" ]; then
+              git -C "$src" -c user.name=ci -c user.email=ci@localhost tag "$tag"
+            fi
+            # pyiron release workflows rewrite == pins into ranges before
+            # building; do the same so the candidate carries release metadata.
+            script="$src/.github/actions/.support/update_pyproject_dependencies.py"
+            if [ -f "$script" ]; then
+              (cd "$src" && python "$script" --input_toml=pyproject.toml \
+                --lower_bound_yaml=.ci_support/lower-bound.yml \
+                --upper_bound_yaml=.ci_support/upper-bound.yml \
+                --semantic_upper_bound=minor --always_pin_unstable=yes \
+                --output_toml=none \
+                --pypi_to_conda_name_map_file=.github/actions/.support/pypi_vs_conda_names.json)
+            fi
+            python -m build --wheel --outdir "$WH" "$src"
+          done <<< "$CANDIDATES"
+          touch "$WH/.keep"  # the artifact must exist even when nothing was built
+          ls -la "$WH"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheelhouse
+          path: ${{ runner.temp }}/wheelhouse/
+          if-no-files-found: ignore
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -32,7 +92,7 @@ jobs:
           path: dist/
 
   install:
-    needs: build
+    needs: [build, upstream]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -48,6 +108,10 @@ jobs:
         with:
           name: dist
           path: dist/
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheelhouse
+          path: ${{ runner.temp }}/wheelhouse
       - name: Install into a fresh venv from outside the checkout
         run: |
           WORK="$RUNNER_TEMP/clean"
@@ -60,7 +124,7 @@ jobs:
             PKG=$(ls "$GITHUB_WORKSPACE"/dist/*.tar.gz)
           fi
           cd "$WORK"
-          "$WORK/venv/bin/python" -m pip install "${PKG}[test]"
+          "$WORK/venv/bin/python" -m pip install --find-links "$RUNNER_TEMP/wheelhouse" "${PKG}[test]"
           "$WORK/venv/bin/python" -m pip check
       - name: Import and CLI smoke test
         working-directory: ${{ runner.temp }}/clean
