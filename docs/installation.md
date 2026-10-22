@@ -2,6 +2,15 @@
 
 ## The short version
 
+```bash
+python -m pip install assystant
+assystant --help
+```
+
+in any fresh Python 3.11/3.12 environment — see
+[below](#building-an-environment-from-scratch) for venv, uv, conda and pixi, and
+for the [pre-release caveat](#before-the-dependencies-are-on-pypi).
+
 On the MPIE cluster an environment already exists and is the one every example
 in these docs was executed in:
 
@@ -24,68 +33,82 @@ works fine and is what the examples do:
 
 ## Building an environment from scratch
 
-`assystant` needs Python 3.11–3.13 (`pyiron_workflow` 0.19 supports no others)
-and three libraries that are not on PyPI:
-
-| package | source | why |
-|---|---|---|
-| `pyiron_workflow` >= 0.19, < 0.20 | PyPI | the graph runtime |
-| `flowrep` >= 0.6, < 0.7 | PyPI | the graph description language 0.19 split out |
-| `pyiron_workflow_vasp` | [ligerzero-ai/pyiron_workflow_vasp](https://github.com/ligerzero-ai/pyiron_workflow_vasp), branch `main` | VASP input writing and output parsing |
-| `pyiron_workflow_assyst` >= 0.2 | [ligerzero-ai/pyiron_workflow_assyst](https://github.com/ligerzero-ai/pyiron_workflow_assyst), branch `main` | the ASSYST graph and structure filters |
-
-Both `pyiron_workflow_*` ports to 0.19 are merged to `main` in their respective
-repos. Neither has a release tag carrying the 0.19 work, which matters for the
-install order below.
-
-Create the environment with conda first, because the scientific stack needs to be
-importable *at build time* for one of the packages:
+`assystant` is a normal Python package. In a fresh environment with Python 3.11
+or 3.12, one command installs it and everything it needs:
 
 ```bash
-mamba create -n assystant -c conda-forge python=3.12 \
-    ase numpy scipy pandas scikit-learn pymatgen pyxtal pyyaml tqdm
-mamba activate assystant
-pip install "pyiron_workflow>=0.19,<0.20" flowrep
+python -m pip install assystant
 ```
 
-Then the three source packages, in this order:
+No `--no-build-isolation`, no install order, nothing to pre-install. Pick
+whichever environment manager you already use:
 
 ```bash
-git clone https://github.com/ligerzero-ai/pyiron_workflow_vasp
-git clone https://github.com/ligerzero-ai/pyiron_workflow_assyst
-git clone https://github.com/ligerzero-ai/assystant
+# venv
+python3.12 -m venv assystant-env
+assystant-env/bin/python -m pip install assystant
 
-pip install --no-build-isolation -e ./pyiron_workflow_vasp
-pip install -e ./pyiron_workflow_assyst
-pip install -e ./assystant
+# uv
+uv venv -p 3.12 assystant-env
+uv pip install -p assystant-env/bin/python assystant
+
+# conda / mamba (Python from conda-forge, the rest from PyPI)
+mamba create -n assystant -c conda-forge python=3.12 pip
+mamba run -n assystant python -m pip install assystant
+
+# pixi
+pixi init assystant && cd assystant
+pixi add python=3.12
+pixi add --pypi assystant
 ```
 
-Two wrinkles, both verified, both harmless once you know about them:
+Python 3.13 is allowed by `assystant` itself but not yet by
+`pyiron_workflow_vasp` (`requires-python <3.13`), so `pip` refuses it.
 
-* **`pyiron_workflow_vasp` needs `--no-build-isolation`.** Its build backend
-  imports `ase` while generating requirements, so in pip's isolated build
-  environment it fails with `ModuleNotFoundError: No module named 'ase'` before
-  it ever gets to installing. Building against the conda environment, which
-  already has `ase`, is what `--no-build-isolation` does. Do *not* pass the same
-  flag to the other two: `pyiron_workflow_assyst` and `assystant` build with
-  `hatchling`, which the isolated environment supplies and the conda environment
-  does not (`BackendUnavailable: Cannot import 'hatchling.build'`).
+What gets pulled in:
 
-* **`pip check` will complain about `pyiron_workflow_vasp`'s version.** Both
-  `assystant` and `pyiron_workflow_assyst` declare `pyiron_workflow_vasp>=0.2.0`,
-  but that repo derives its version from git tags via versioneer and its newest
-  tag is `pyiron_workflow_vasp-0.1.0`, so a checkout of `main` reports something
-  like `0.1.0.post0.dev17`:
+| package | why |
+|---|---|
+| `pyiron_workflow` >= 0.19, < 0.21 | the graph runtime |
+| `pyiron_workflow_assyst` >= 0.2, < 0.3 | the ASSYST graph and structure filters |
+| `pyiron_workflow_vasp` (via `pyiron_workflow_assyst`) | VASP input writing and output parsing |
+| `pyxtal`, `pymatgen`, `numpy`, `pandas`, `PyYAML`, `tqdm` | structure generation and bookkeeping |
 
-  ```
-  assystant 0.1.0 has requirement pyiron-workflow-vasp>=0.2.0,
-      but you have pyiron-workflow-vasp 0.1.0.post0.dev2.
-  ```
+The CLI is then on `PATH` of that environment:
 
-  The code on `main` *is* the 0.19-ported code the constraint is asking for; only
-  the version string is behind. An editable install is unaffected. A non-editable
-  `pip install git+https://...` of `assystant` would fail to resolve, which is why
-  the recipe above installs the dependency from source first.
+```bash
+assystant --help
+assystant gen     camp.yaml              # PyXtal scan -> POSCARs + manifest
+assystant run     camp.yaml --dry-run    # render the job scripts without submitting
+assystant run     camp.yaml              # submit to SLURM
+assystant status  camp.yaml
+assystant collect camp.yaml -o train.pkl
+```
+
+`gen` (and `run --dry-run`) work anywhere. Actually running DFT needs three
+things on top of the Python install: a SLURM cluster to submit to (`slurm:` in
+the YAML; `slurm.env` must be this environment, as seen from the compute
+nodes), a VASP binary (`vasp:`, [below](#vasp-itself)), and a POTCAR
+configuration file in `$PYIRON_VASP_CONFIG` or `~/.pyiron_vasp_config`
+([below](#the-potcar-library)). Each job runs
+`<slurm.env>/bin/python -m assystant.runner ...`.
+
+### Before the dependencies are on PyPI
+
+`pyiron_workflow_vasp` 0.2.0 and `pyiron_workflow_assyst` 0.2.0 — the releases
+carrying the `pyiron_workflow` 0.19 port — are not on PyPI yet, so until they
+are, `pip install assystant` cannot resolve. Put their 0.2.0 wheels (built with
+`python -m build` from each repo's `0.2.0` release tag — a plain checkout of
+`main` reports a `0.1.0.post…` version that does not satisfy `>=0.2.0`) in a
+directory and point the installer at it:
+
+```bash
+python -m pip install --find-links wheelhouse/ assystant
+# or
+uv pip install --find-links wheelhouse/ assystant
+```
+
+Once both are released this section goes away.
 
 ## The POTCAR library
 
@@ -160,7 +183,8 @@ value surfaces as a failed job rather than a failed submission.
 ## Verifying the install
 
 ```bash
-pytest tests/ -q
+python -m pip install "assystant[test]"
+pytest tests/ -q          # from a checkout, or any copy of its tests/ directory
 ```
 
 108 tests, none of which touch SLURM or VASP. For an end-to-end check that does
