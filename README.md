@@ -38,11 +38,34 @@ assystant collect camp.yaml -o train.pkl           # one dataframe
 Background: [design spec](docs/2026_07_31_assystant_design.md) ·
 [implementation report](docs/implementation-report.txt)
 
+## Install
+
+```bash
+python -m pip install assystant
+```
+
+Python 3.11–3.13. No `--no-build-isolation`, no pre-installed scientific stack:
+`pip`, `uv pip install assystant`, a `venv`, a conda/mamba env or a pixi project
+all work the same way. See [installation](docs/installation.md) for each variant,
+the POTCAR configuration and what a real run additionally needs (SLURM, a VASP
+binary).
+
+> **Pre-release:** until `pyiron_workflow_vasp` 0.2.0 and
+> `pyiron_workflow_assyst` 0.2.0 are on PyPI, install those two from their wheels
+> first — see [installation](docs/installation.md#before-the-dependencies-are-on-pypi).
+
 ## Quick start
 
 ```bash
-/cmmc/ptmp/hmai/mambaforge/envs/assystant/bin/assystant gen examples/Al_tutorial.yaml
+assystant --help
+assystant gen examples/Al_tutorial.yaml --root ./al_campaign --no-progress
 ```
+
+`gen` needs neither SLURM nor VASP, so this works on any machine: it writes 43
+POSCARs and a `manifest.csv` under `./al_campaign/Al/`. `--root` overrides the
+cluster path in the YAML. To go further — `run`, `status`, `collect` — edit the
+`slurm:` and `vasp:` sections to point at your partition, environment and VASP
+binary, and set up the [POTCAR config](docs/installation.md#the-potcar-library).
 
 [`examples/Al_tutorial.yaml`](examples/Al_tutorial.yaml) is a small, complete,
 minutes-long campaign walked through in
@@ -88,9 +111,31 @@ another. See
 ## Tests
 
 ```bash
-/cmmc/ptmp/hmai/mambaforge/envs/assystant/bin/pytest tests/ -q
+python -m pip install "assystant[test]"
+pytest tests/ -q
 ```
 
 108 tests. None call SLURM or VASP; `submit_campaign` takes `queued_dirs` and
 `submit_fn` injection seams for exactly that reason. For an end-to-end check that
 runs real DFT, use [`examples/Fe_smoke.yaml`](examples/Fe_smoke.yaml).
+
+## Releasing
+
+Releases go to PyPI from GitHub Actions via
+[trusted publishing](https://docs.pypi.org/trusted-publishers/), so no API token
+is stored anywhere.
+
+1. Bump `__version__` in `assystant/__init__.py` (the only place the version lives) and add
+   an entry to [`CHANGELOG.md`](CHANGELOG.md).
+2. Open a PR and merge it to `main`. The
+   [`release`](.github/workflows/release.yml) workflow builds the sdist and
+   wheel and runs `twine check --strict` on every PR as a dry run.
+3. Create a GitHub release with tag `v<version>` (e.g. `v0.1.0`). Publishing
+   the release builds again, checks that the tag matches the package version
+   (a `v` or `assystant-` prefix is stripped), and uploads to
+   [PyPI](https://pypi.org/p/assystant).
+
+One-time setup: on PyPI, add a trusted publisher for `assystant` with owner
+`ligerzero-ai`, repository `assystant`, workflow `release.yml` and environment
+`pypi`, and create a `pypi` environment in the GitHub repository settings
+(optionally with required reviewers).

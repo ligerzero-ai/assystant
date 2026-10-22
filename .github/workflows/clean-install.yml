@@ -1,0 +1,143 @@
+# Proves a fresh environment can `pip install assystant` with no
+# --no-build-isolation and no pre-installed scientific stack: build sdist and
+# wheel in isolation, install each into an empty venv from outside the
+# checkout, then run the CLI and the test suite against the installed copy.
+#
+# Upstream requirements that are not released yet are built as release
+# candidates by the `upstream` job (see there).
+
+name: clean-install
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Release candidates for upstream packages that are not on PyPI yet.
+  # For each requirement below, if PyPI already satisfies it nothing is built
+  # and the install jobs test against the published release. Otherwise a wheel
+  # is built from the upstream pull request that prepares that release (the
+  # same way its release workflow will build it) and handed to the install
+  # jobs via --find-links. Once the releases are out this job is a no-op and
+  # the CANDIDATES entries can be deleted.
+  upstream:
+    runs-on: ubuntu-latest
+    env:
+      # requirement | GitHub repo | git ref | versioneer tag to stamp (or "-")
+      CANDIDATES: |
+        pyiron_workflow_vasp>=0.2.0,<0.3 | pyiron/pyiron_workflow_vasp | pull/7/head | pyiron_workflow_vasp-0.2.0
+        pyiron_workflow_assyst>=0.2.0,<0.3 | ligerzero-ai/pyiron_workflow_assyst | pull/2/head | -
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheels for unreleased upstream requirements
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build pyyaml==6.0.1 toml==0.10.2
+          WH="$RUNNER_TEMP/wheelhouse"; mkdir -p "$WH"
+          while IFS='|' read -r req repo ref tag; do
+            req=$(echo "$req" | xargs); repo=$(echo "$repo" | xargs)
+            ref=$(echo "$ref" | xargs); tag=$(echo "$tag" | xargs)
+            [ -z "$req" ] && continue
+            if python -m pip download -q --no-deps -d "$RUNNER_TEMP/probe" "$req" 2>/dev/null; then
+              echo "::notice::$req is on PyPI; testing against the release"
+              continue
+            fi
+            echo "::warning::$req is not on PyPI yet; building a candidate from $repo@$ref"
+            src="$RUNNER_TEMP/src-${repo##*/}"
+            git clone -q "https://github.com/$repo" "$src"
+            git -C "$src" fetch -q origin "$ref"
+            git -C "$src" checkout -q FETCH_HEAD
+            if [ "$tag" != "-" ]; then
+              # -f: the upstream tag may already exist on another commit; this
+              # clone is throwaway, so stamping the candidate is local only.
+              git -C "$src" -c user.name=ci -c user.email=ci@localhost tag -f "$tag"
+            fi
+            # pyiron release workflows rewrite == pins into ranges before
+            # building; do the same so the candidate carries release metadata.
+            script="$src/.github/actions/.support/update_pyproject_dependencies.py"
+            if [ -f "$script" ]; then
+              (cd "$src" && python "$script" --input_toml=pyproject.toml \
+                --lower_bound_yaml=.ci_support/lower-bound.yml \
+                --upper_bound_yaml=.ci_support/upper-bound.yml \
+                --semantic_upper_bound=minor --always_pin_unstable=yes \
+                --output_toml=none \
+                --pypi_to_conda_name_map_file=.github/actions/.support/pypi_vs_conda_names.json)
+            fi
+            python -m build --wheel --outdir "$WH" "$src"
+          done <<< "$CANDIDATES"
+          # The artifact must exist even when nothing was built, and upload-artifact
+          # skips hidden files, so leave a visible manifest.
+          (cd "$WH" && ls *.whl 2>/dev/null || true) > "$WH/MANIFEST.txt"
+          ls -la "$WH"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheelhouse
+          path: ${{ runner.temp }}/wheelhouse/
+          if-no-files-found: ignore
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist and wheel (isolated)
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check --strict dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  install:
+    needs: [build, upstream]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+        source: [wheel, sdist]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheelhouse
+          path: ${{ runner.temp }}/wheelhouse
+      - name: Install into a fresh venv from outside the checkout
+        run: |
+          WORK="$RUNNER_TEMP/clean"
+          mkdir -p "$WORK"
+          python -m venv "$WORK/venv"
+          "$WORK/venv/bin/python" -m pip install --upgrade pip
+          if [ "${{ matrix.source }}" = wheel ]; then
+            PKG=$(ls "$GITHUB_WORKSPACE"/dist/*.whl)
+          else
+            PKG=$(ls "$GITHUB_WORKSPACE"/dist/*.tar.gz)
+          fi
+          cd "$WORK"
+          "$WORK/venv/bin/python" -m pip install --find-links "$RUNNER_TEMP/wheelhouse" "${PKG}[test]"
+          "$WORK/venv/bin/python" -m pip check
+      - name: Import and CLI smoke test
+        working-directory: ${{ runner.temp }}/clean
+        run: |
+          venv/bin/python -c "import assystant, sys; print(assystant.__version__, assystant.__file__); assert 'site-packages' in assystant.__file__"
+          venv/bin/assystant --help
+          venv/bin/assystant gen "$GITHUB_WORKSPACE/examples/Al_tutorial.yaml" --root "$RUNNER_TEMP/clean/camp" --no-progress
+      - name: Test suite against the installed package
+        working-directory: ${{ runner.temp }}/clean
+        run: |
+          cp -r "$GITHUB_WORKSPACE/tests" tests
+          venv/bin/python -m pytest tests -q -p no:cacheprovider
