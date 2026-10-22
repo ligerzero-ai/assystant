@@ -1,0 +1,82 @@
+# Proves a fresh environment can `pip install assystant` with no
+# --no-build-isolation and no pre-installed scientific stack: build sdist and
+# wheel in isolation, install each into an empty venv from outside the
+# checkout, then run the CLI and the test suite against the installed copy.
+#
+# NOTE: this stays red until pyiron_workflow_vasp 0.2.0 and
+# pyiron_workflow_assyst 0.2.0 are published on PyPI -- before that the
+# `pyiron_workflow_assyst>=0.2.0` requirement cannot resolve.
+#
+# Python 3.13 is left out of the matrix until pyiron_workflow_vasp lifts its
+# `requires-python <3.13`.
+
+name: clean-install
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist and wheel (isolated)
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check --strict dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  install:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+        source: [wheel, sdist]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Install into a fresh venv from outside the checkout
+        run: |
+          WORK="$RUNNER_TEMP/clean"
+          mkdir -p "$WORK"
+          python -m venv "$WORK/venv"
+          "$WORK/venv/bin/python" -m pip install --upgrade pip
+          if [ "${{ matrix.source }}" = wheel ]; then
+            PKG=$(ls "$GITHUB_WORKSPACE"/dist/*.whl)
+          else
+            PKG=$(ls "$GITHUB_WORKSPACE"/dist/*.tar.gz)
+          fi
+          cd "$WORK"
+          "$WORK/venv/bin/python" -m pip install "${PKG}[test]"
+          "$WORK/venv/bin/python" -m pip check
+      - name: Import and CLI smoke test
+        working-directory: ${{ runner.temp }}/clean
+        run: |
+          venv/bin/python -c "import assystant, sys; print(assystant.__version__, assystant.__file__); assert 'site-packages' in assystant.__file__"
+          venv/bin/assystant --help
+          venv/bin/assystant gen "$GITHUB_WORKSPACE/examples/Al_tutorial.yaml" --root "$RUNNER_TEMP/clean/camp" --no-progress
+      - name: Test suite against the installed package
+        working-directory: ${{ runner.temp }}/clean
+        run: |
+          cp -r "$GITHUB_WORKSPACE/tests" tests
+          venv/bin/python -m pytest tests -q -p no:cacheprovider
