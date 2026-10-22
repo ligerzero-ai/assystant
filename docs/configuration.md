@@ -8,7 +8,7 @@ $ assystant gen camp.yaml --set assyst.nonsense=1
 error: unknown config path: assyst.nonsense
 ```
 
-Every section is optional except `root`, `system.species` and — whenever
+Every section is optional except `system.species` and — whenever
 `assyst.ionic_steps > 0`, which is always in practice — `incar.IBRION`.
 Everything else has a default, listed below.
 
@@ -44,8 +44,8 @@ remove `IBRION` from your INCAR. Delete the key from the YAML instead.
 
 ## `root`
 
-**Required. No default.** The campaign directory. Everything the campaign
-writes lives underneath it:
+Default: the current working directory. The campaign directory. Everything the
+campaign writes lives underneath it:
 
 ```
 <root>/
@@ -58,6 +58,10 @@ writes lives underneath it:
 
 Made absolute on load, so a relative `root` is resolved against your current
 directory at the time you run the command — write it absolute to avoid surprises.
+Leaving `root` out entirely has the same effect as `root: .`: each system lands
+in `./<system>/` and `run` records its config in `./assystant_config.yaml`. The
+bundled tutorial template (`assystant example Al_tutorial`) uses the relative
+`root: ./Al_campaign`, so run all its commands from the same directory.
 
 Point `root` at a *fresh* directory for a campaign with different physics. It is
 the cheapest way to avoid the staleness guard and the only way to keep two
@@ -361,6 +365,8 @@ sexagesimal integer. **`mem_per_cpu`** — default `"2000MB"`.
 **`env`** — default `null` → the interpreter running `assystant` itself. A conda
 prefix whose `bin/python` runs the in-job runner. Set this whenever you invoke
 `assystant` from a different environment than the one the jobs should use.
+Leaving it unset is what makes a config portable: the rendered job script then
+names whatever interpreter `assystant` was run with.
 
 **`account`** — default `null`; emitted as `#SBATCH --account=` when set.
 **`extra_directives`** — default `[]`; a list of verbatim `#SBATCH` argument
@@ -382,6 +388,11 @@ vasp:
 
 **`binary`** — default `vasp_std`; required to be non-empty. Write an absolute
 path.
+
+**Placeholders.** A string value beginning `<EDIT` — as in the bundled
+templates' `slurm.partition` and `vasp.binary` — is a placeholder. It is
+accepted by `gen` and `run --dry-run`, but a real `run` refuses to submit while
+any is left, naming the dotted paths still to fill in.
 
 **`custodian`** — default `true`. Drives VASP through a custodian wrapper with
 `VaspErrorHandler`, `NonConvergingErrorHandler` and `FrozenJobErrorHandler`, which

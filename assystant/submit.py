@@ -24,6 +24,7 @@ from pathlib import Path
 from . import config as config_mod
 from .config import (
     CampaignConfig,
+    ConfigError,
     StaleConfigError,
     load_recorded_config,
     recorded_config_path,
@@ -197,6 +198,24 @@ def guard_config(cfg: CampaignConfig, *, from_scratch: bool = False, write: bool
     return path
 
 
+def _refuse_placeholders(cfg: CampaignConfig) -> None:
+    """Refuse a real submission while a template's ``"<EDIT ...>"`` values remain.
+
+    A bundled template (``assystant example``) renders and dry-runs as shipped,
+    but a placeholder partition or VASP binary would only fail inside the
+    allocation, after queueing -- catch it before anything reaches ``sbatch``.
+    """
+    from .examples import placeholder_fields
+
+    left = placeholder_fields(cfg)
+    if left:
+        raise ConfigError(
+            f"placeholder value(s) still set at: {', '.join(left)}. Edit them in "
+            "the campaign YAML (or override them, e.g. --partition / --vasp-binary) "
+            "before a real `run`; `run --dry-run` works without them."
+        )
+
+
 def _sbatch(script_path: Path) -> None:
     subprocess.run(["sbatch", str(script_path)], check=True)
 
@@ -233,6 +252,8 @@ def submit_campaign(
     counts, in ``stats["would_delete"]``, the run_dirs that exist and would
     have been wiped, so the summary can say so without touching them.
     """
+    if not dry_run:
+        _refuse_placeholders(cfg)
     config_path = guard_config(cfg, from_scratch=from_scratch, write=True)
     if queued_dirs is None:
         queued_dirs = set() if dry_run else squeue_workdirs()

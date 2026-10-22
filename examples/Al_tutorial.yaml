@@ -8,6 +8,9 @@
 #   assystant status  examples/Al_tutorial.yaml
 #   assystant collect examples/Al_tutorial.yaml -o Al_tutorial_train.pkl
 #
+# This is the MPIE cluster copy (absolute paths). `assystant example Al_tutorial`
+# writes a portable copy bundled with the package.
+#
 # ENCUT/PREC here are tutorial-grade, not production-grade; see Fe_unary.yaml.
 
 root: /cmmc/ptmp/hmai/assystant_tutorial/campaign

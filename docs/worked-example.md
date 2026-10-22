@@ -5,7 +5,13 @@ per cell, the cubic spacegroups only — small enough that the whole thing finis
 in minutes, and structurally identical to a production campaign, which is this
 file with bigger numbers.
 
-The config is [`examples/Al_tutorial.yaml`](../examples/Al_tutorial.yaml).
+The config is [`examples/Al_tutorial.yaml`](../examples/Al_tutorial.yaml), as
+run on the MPIE cluster, so its paths are absolute and site-specific. To follow
+along anywhere else, start from the portable copy bundled with the package —
+`assystant example Al_tutorial -o Al_tutorial.yaml` — which differs only in
+`root` (relative), `slurm.env` (unset: the interpreter running `assystant`) and
+`"<EDIT ...>"` placeholders for the partition and VASP binary, plus
+`vasp.custodian: false` and `vasp.modules: []`.
 
 ## 0. The config
 

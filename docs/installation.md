@@ -8,8 +8,27 @@ assystant --help
 ```
 
 in any fresh Python 3.11–3.13 environment — see
-[below](#building-an-environment-from-scratch) for venv, uv, conda and pixi, and
-for the [pre-release caveat](#before-the-dependencies-are-on-pypi).
+[below](#building-an-environment-from-scratch) for venv, uv, conda and pixi.
+
+## Quick start
+
+The package ships a portable tutorial campaign. From any empty directory:
+
+```bash
+assystant example Al_tutorial -o camp.yaml       # write the bundled template
+assystant gen camp.yaml --no-progress            # PyXtal scan -> ./Al_campaign/Al/
+assystant run camp.yaml --dry-run --limit 1      # render one job script; read it
+```
+
+No `--root` or `--env` is needed: the template's `root` is the relative
+`./Al_campaign`, and with `slurm.env` unset the rendered job script runs the
+Python of the environment `assystant` is installed in. `assystant example` with
+no name lists the bundled templates; without `-o` it prints to stdout.
+
+A real `run` needs the template's `"<EDIT ...>"` placeholders filled in — the
+SLURM partition and the VASP binary, plus `vasp.modules` if your VASP needs
+them — and refuses to submit while any is left. It also needs the
+[POTCAR configuration](#the-potcar-library).
 
 On the MPIE cluster an environment already exists and is the one every example
 in these docs was executed in:
@@ -101,32 +120,6 @@ configuration file in `$PYIRON_VASP_CONFIG` or `~/.pyiron_vasp_config`
 ([below](#the-potcar-library)). Each job runs
 `<slurm.env>/bin/python -m assystant.runner ...`.
 
-### Before the dependencies are on PyPI
-
-`pyiron_workflow_vasp` 0.2.0 and `pyiron_workflow_assyst` 0.2.0 — the releases
-carrying the `pyiron_workflow` 0.19 port — are not on PyPI yet, so until they
-are, `pip install assystant` cannot resolve. Put their 0.2.0 wheels (built with
-`python -m build` from each repo's `0.2.0` release tag — a plain checkout of
-`main` reports a `0.1.0.post…` version that does not satisfy `>=0.2.0`) in a
-directory and point the installer at it:
-
-```bash
-python -m pip install --find-links wheelhouse/ assystant
-# or
-uv pip install --find-links wheelhouse/ assystant
-```
-
-With pixi, put the wheelhouse in `pixi.toml`. Setting `find-links` makes pixi
-(0.68) stop using PyPI unless you name it again:
-
-```toml
-[pypi-options]
-index-url = "https://pypi.org/simple"
-find-links = [{ path = "wheelhouse" }]
-```
-
-Once both are released this section goes away.
-
 ## The POTCAR library
 
 `assystant` never names a POTCAR. `pyiron_workflow_vasp` resolves them from a
@@ -204,6 +197,6 @@ python -m pip install "assystant[test]"
 pytest tests/ -q          # from a checkout, or any copy of its tests/ directory
 ```
 
-108 tests, none of which touch SLURM or VASP. For an end-to-end check that does
+124 tests, none of which touch SLURM or VASP. For an end-to-end check that does
 run real DFT — without a scheduler, on a login node, in a couple of minutes — see
 the smoke test in [`operations.md`](operations.md#smoke-testing-without-a-scheduler).
