@@ -20,14 +20,15 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 
+# Only what assystant imports itself.  pyiron_workflow_vasp, flowrep and ase
+# arrive transitively through pyiron_workflow_assyst / pyiron_workflow / pymatgen,
+# which carry the bounds that matter for them.
 dependencies = [
-    "pyiron_workflow>=0.19,<0.20",
-    "flowrep>=0.6,<0.7",
-    "pyiron_workflow_assyst>=0.2.0",
-    "pyiron_workflow_vasp>=0.2.0",
+    "pyiron_workflow>=0.19,<0.21",
+    "pyiron_workflow_assyst>=0.2.0,<0.3",
     "pyxtal>=1.0",
     "pymatgen>=2023.0.0",
-    "ase>=3.22.0",
+    "numpy",
     "pandas>=1.3.0",
     "PyYAML>=6.0",
     "tqdm>=4.0",
