@@ -68,7 +68,9 @@ jobs:
             fi
             python -m build --wheel --outdir "$WH" "$src"
           done <<< "$CANDIDATES"
-          touch "$WH/.keep"  # the artifact must exist even when nothing was built
+          # The artifact must exist even when nothing was built, and upload-artifact
+          # skips hidden files, so leave a visible manifest.
+          (cd "$WH" && ls *.whl 2>/dev/null || true) > "$WH/MANIFEST.txt"
           ls -la "$WH"
       - uses: actions/upload-artifact@v4
         with:
