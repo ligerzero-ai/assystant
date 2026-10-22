@@ -16,6 +16,8 @@ All notable changes to this project are documented here. The format follows
   still an `"<EDIT ...>"` template placeholder. The staleness guard ignores a
   placeholder recorded by an earlier `run --dry-run`, so filling one in
   afterwards does not demand `--from-scratch`.
+- Python 3.14 support: `requires-python` is now `>=3.11,<3.15`, with a
+  3.14 classifier and a 3.14 leg in the clean-install CI matrix.
 
 ### Changed
 

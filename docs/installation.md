@@ -7,7 +7,7 @@ python -m pip install assystant
 assystant --help
 ```
 
-in any fresh Python 3.11–3.13 environment — see
+in any fresh Python 3.11–3.14 environment — see
 [below](#building-an-environment-from-scratch) for venv, uv, conda and pixi.
 
 ## Quick start
@@ -53,7 +53,7 @@ works fine and is what the examples do:
 ## Building an environment from scratch
 
 `assystant` is a normal Python package. In a fresh environment with Python 3.11,
-3.12 or 3.13, one command installs it and everything it needs:
+3.12, 3.13 or 3.14, one command installs it and everything it needs:
 
 ```bash
 python -m pip install assystant
@@ -91,6 +91,10 @@ Otherwise the PyPI solve fails with "pinned by the conda solve" errors.
 
 Python 3.13 needs `pyiron_workflow_vasp` 0.2.0 or later, the first release
 declaring `requires-python <3.14`; with 0.1.x `pip` refuses 3.13.
+Likewise Python 3.14 needs the releases that declare `requires-python <3.15`:
+`pyiron_workflow_vasp` 0.2.1, `pyiron_workflow_assyst` 0.2.1 and
+`pyiron_workflow_atomistics` 0.2.4 or later. `pip` picks them automatically;
+older ones are skipped on 3.14.
 
 What gets pulled in:
 
