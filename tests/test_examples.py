@@ -14,7 +14,7 @@ import yaml
 from pymatgen.core import Lattice, Structure
 
 from assystant.cli import main
-from assystant.config import CampaignConfig, ConfigError
+from assystant.config import CampaignConfig, ConfigError, StaleConfigError
 from assystant.examples import (
     list_templates,
     placeholder_fields,
@@ -173,3 +173,20 @@ def test_cli_run_dry_run_from_template_needs_no_flags(tmp_path, monkeypatch, cap
     assert "rendered 1" in capsys.readouterr().out
     assert main(["run", "camp.yaml", "--limit", "1"]) == 2
     assert "placeholder" in capsys.readouterr().err
+
+
+def test_filling_placeholders_after_dry_run_is_not_stale(template_campaign):
+    submit_campaign(template_campaign, dry_run=True)
+    cfg = template_campaign.resolve(
+        {"slurm.partition": "debug", "vasp.binary": "/opt/vasp/bin/vasp_std"}
+    )
+    submitted = []
+    stats = submit_campaign(cfg, queued_dirs=set(), submit_fn=submitted.append)
+    assert stats["submitted"] == 1 and len(submitted) == 1
+    # ...but a real value, once recorded, is guarded as before.
+    with pytest.raises(StaleConfigError, match="vasp.binary"):
+        submit_campaign(
+            cfg.resolve({"vasp.binary": "/other/vasp_std"}),
+            queued_dirs=set(),
+            submit_fn=submitted.append,
+        )

@@ -52,6 +52,13 @@ RECORDED_CONFIG_NAME = "assystant_config.yaml"
 #: change the numbers and therefore invalidates an existing run directory.
 _STALENESS_EXEMPT_SECTIONS = ("slurm",)
 
+#: Marker opening every value a bundled template leaves for the user to fill in
+#: (see :mod:`assystant.examples`).  A real ``run`` refuses to submit while one
+#: is set, so nothing is ever computed with it, and the staleness guard ignores a
+#: *recorded* placeholder -- filling one in after a ``run --dry-run`` is not a
+#: change of calculation settings.
+PLACEHOLDER_PREFIX = "<EDIT"
+
 #: ``root`` used when the YAML and the CLI leave it unset: the directory the
 #: command runs from, resolved to an absolute path by :meth:`CampaignConfig.resolve`.
 DEFAULT_ROOT = "."
@@ -561,6 +568,8 @@ def _diff(prefix: str, a, b) -> list[str]:
             sub = f"{prefix}.{key}" if prefix else str(key)
             out.extend(_diff(sub, a.get(key, _MISSING), b.get(key, _MISSING)))
         return out
+    if isinstance(b, str) and b.strip().startswith(PLACEHOLDER_PREFIX):
+        return []
     if _canon(a) != _canon(b):
         return [prefix or "<root>"]
     return []

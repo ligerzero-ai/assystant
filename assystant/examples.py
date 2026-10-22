@@ -14,6 +14,8 @@ from __future__ import annotations
 from importlib.resources import files
 from pathlib import Path
 
+from .config import PLACEHOLDER_PREFIX
+
 __all__ = [
     "list_templates",
     "template_description",
@@ -22,9 +24,6 @@ __all__ = [
     "placeholder_fields",
     "PLACEHOLDER_PREFIX",
 ]
-
-#: Marker that opens every value a template leaves for the user to fill in.
-PLACEHOLDER_PREFIX = "<EDIT"
 
 
 def _templates():

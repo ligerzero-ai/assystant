@@ -13,7 +13,9 @@ All notable changes to this project are documented here. The format follows
   `examples/Al_tutorial.yaml`, so `pip install assystant` users get the
   tutorial without a repository checkout.
 - A real `run` (not `--dry-run`) refuses to submit while any config value is
-  still an `"<EDIT ...>"` template placeholder.
+  still an `"<EDIT ...>"` template placeholder. The staleness guard ignores a
+  placeholder recorded by an earlier `run --dry-run`, so filling one in
+  afterwards does not demand `--from-scratch`.
 
 ### Changed
 

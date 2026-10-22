@@ -392,7 +392,9 @@ path.
 **Placeholders.** A string value beginning `<EDIT` — as in the bundled
 templates' `slurm.partition` and `vasp.binary` — is a placeholder. It is
 accepted by `gen` and `run --dry-run`, but a real `run` refuses to submit while
-any is left, naming the dotted paths still to fill in.
+any is left, naming the dotted paths still to fill in. Replacing a placeholder
+recorded by an earlier `run --dry-run` does not trip the
+[staleness guard](operations.md#the-staleness-guard); nothing was ever computed with it.
 
 **`custodian`** — default `true`. Drives VASP through a custodian wrapper with
 `VaspErrorHandler`, `NonConvergingErrorHandler` and `FrozenJobErrorHandler`, which
