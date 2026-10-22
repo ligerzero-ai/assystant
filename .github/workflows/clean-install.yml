@@ -101,7 +101,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
         source: [wheel, sdist]
     steps:
       - uses: actions/checkout@v4
@@ -136,6 +136,11 @@ jobs:
           venv/bin/python -c "import assystant, sys; print(assystant.__version__, assystant.__file__); assert 'site-packages' in assystant.__file__"
           venv/bin/assystant --help
           venv/bin/assystant gen "$GITHUB_WORKSPACE/examples/Al_tutorial.yaml" --root "$RUNNER_TEMP/clean/camp" --no-progress
+          # the bundled template must ship in the artifact and work with no flags
+          mkdir tut && cd tut
+          ../venv/bin/assystant example Al_tutorial -o camp.yaml
+          ../venv/bin/assystant gen camp.yaml --no-progress
+          ../venv/bin/assystant run camp.yaml --dry-run --limit 1
       - name: Test suite against the installed package
         working-directory: ${{ runner.temp }}/clean
         run: |

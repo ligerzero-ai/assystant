@@ -1,10 +1,40 @@
 # Command reference
 
-Four commands, all taking the campaign YAML as their first argument and all
-accepting the [override flags](configuration.md#overrides-and-precedence).
+Four campaign commands, all taking the campaign YAML as their first argument and
+all accepting the [override flags](configuration.md#overrides-and-precedence),
+plus `example`, which writes out a starting YAML.
 
 Every transcript below was executed against the campaign in
 [`worked-example.md`](worked-example.md) and is pasted verbatim.
+
+---
+
+## `example`
+
+```
+assystant example [NAME] [-o FILE] [--force]
+```
+
+Campaign templates bundled with the package, so a `pip install` is enough to
+get a working config. With no `NAME`, lists them:
+
+```
+$ assystant example
+Al_tutorial  Unary Al tutorial campaign: 1-4 atoms, cubic spacegroups, minutes of DFT.
+```
+
+With `NAME`, prints that template to stdout, or with `-o FILE` writes it there
+(refusing to overwrite an existing file unless `--force`):
+
+```
+$ assystant example Al_tutorial -o camp.yaml
+wrote camp.yaml
+```
+
+The templates carry no site-specific paths: `root` is relative, `slurm.env` is
+unset (jobs use the interpreter running `assystant`), and the values only a real
+`run` needs are `"<EDIT ...>"` placeholders — see
+[configuration](configuration.md#vasp--how-vasp-is-invoked).
 
 ---
 

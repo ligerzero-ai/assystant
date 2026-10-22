@@ -20,7 +20,7 @@ from .generate import (
 from .incar import get_incar_magmom_string, stack_element_string
 from .submit import RESULT_FILENAME
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "CampaignConfig",

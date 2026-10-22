@@ -30,7 +30,7 @@ assystant collect camp.yaml -o train.pkl           # one dataframe
 | [**Installation**](docs/installation.md) | dependencies, install order, the POTCAR config |
 | [**Worked example**](docs/worked-example.md) | a complete campaign, start to finish, that you can copy |
 | [**Configuration**](docs/configuration.md) | every YAML key: meaning, default, when to change it |
-| [**Commands**](docs/commands.md) | `gen` / `run` / `status` / `collect` reference |
+| [**Commands**](docs/commands.md) | `example` / `gen` / `run` / `status` / `collect` reference |
 | [**Operations**](docs/operations.md) | content-hashed directories, the staleness guard, `--from-scratch`, smoke testing — the part that saves days |
 | [**Behaviour changes**](docs/behaviour-changes.md) | read before comparing new data against pre-2026 campaigns |
 | [**Troubleshooting**](docs/troubleshooting.md) | real failure modes and their actual error text |
@@ -44,35 +44,39 @@ Background: [design spec](docs/2026_07_31_assystant_design.md) ·
 python -m pip install assystant
 ```
 
-Python 3.11–3.13. No `--no-build-isolation`, no pre-installed scientific stack:
+Python 3.11–3.14. No `--no-build-isolation`, no pre-installed scientific stack:
 `pip`, `uv pip install assystant`, a `venv`, a conda/mamba env or a pixi project
 all work the same way. See [installation](docs/installation.md) for each variant,
 the POTCAR configuration and what a real run additionally needs (SLURM, a VASP
 binary).
 
-> **Pre-release:** until `pyiron_workflow_vasp` 0.2.0 and
-> `pyiron_workflow_assyst` 0.2.0 are on PyPI, install those two from their wheels
-> first — see [installation](docs/installation.md#before-the-dependencies-are-on-pypi).
-
 ## Quick start
 
 ```bash
-assystant --help
-assystant gen examples/Al_tutorial.yaml --root ./al_campaign --no-progress
+python -m pip install assystant
+assystant example Al_tutorial -o camp.yaml       # bundled tutorial campaign
+assystant gen camp.yaml --no-progress            # PyXtal scan -> ./Al_campaign/Al/
+assystant run camp.yaml --dry-run --limit 1      # render one job script; read it
 ```
 
-`gen` needs neither SLURM nor VASP, so this works on any machine: it writes 43
-POSCARs and a `manifest.csv` under `./al_campaign/Al/`. `--root` overrides the
-cluster path in the YAML. To go further — `run`, `status`, `collect` — edit the
-`slurm:` and `vasp:` sections to point at your partition, environment and VASP
-binary, and set up the [POTCAR config](docs/installation.md#the-potcar-library).
+This works from any directory on any machine: `gen` and `run --dry-run` need
+neither SLURM nor VASP, and the bundled template carries no site-specific paths.
+`gen` writes 43 POSCARs and a `manifest.csv` under `./Al_campaign/Al/`; the
+rendered job script runs the Python environment `assystant` is installed in.
+`assystant example` with no name lists the bundled templates.
 
-[`examples/Al_tutorial.yaml`](examples/Al_tutorial.yaml) is a small, complete,
-minutes-long campaign walked through in
-[`docs/worked-example.md`](docs/worked-example.md).
-[`examples/Fe_unary.yaml`](examples/Fe_unary.yaml) shows production settings.
-[`examples/Fe_smoke.yaml`](examples/Fe_smoke.yaml) proves an install actually runs
-DFT, on a login node, in under a minute.
+To go further — a real `run`, then `status` and `collect` — fill in the
+`"<EDIT ...>"` placeholders in `camp.yaml` (SLURM partition, VASP binary; a real
+`run` refuses to submit while any is left) and set up the
+[POTCAR config](docs/installation.md#the-potcar-library). The campaign is walked
+through in [`docs/worked-example.md`](docs/worked-example.md).
+
+The repository's [`examples/`](examples/) directory holds the configs of the
+real MPIE cluster setup, with its absolute paths:
+[`examples/Al_tutorial.yaml`](examples/Al_tutorial.yaml) is the same tutorial
+campaign as run there, [`examples/Fe_unary.yaml`](examples/Fe_unary.yaml) shows
+production settings, and [`examples/Fe_smoke.yaml`](examples/Fe_smoke.yaml)
+proves an install actually runs DFT, on a login node, in under a minute.
 
 ## Layout on disk
 
@@ -115,7 +119,7 @@ python -m pip install "assystant[test]"
 pytest tests/ -q
 ```
 
-108 tests. None call SLURM or VASP; `submit_campaign` takes `queued_dirs` and
+124 tests. None call SLURM or VASP; `submit_campaign` takes `queued_dirs` and
 `submit_fn` injection seams for exactly that reason. For an end-to-end check that
 runs real DFT, use [`examples/Fe_smoke.yaml`](examples/Fe_smoke.yaml).
 

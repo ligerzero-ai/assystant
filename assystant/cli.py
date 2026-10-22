@@ -1,4 +1,4 @@
-"""``assystant`` command line: ``gen`` | ``run`` | ``status`` | ``collect``."""
+"""``assystant`` command line: ``example`` | ``gen`` | ``run`` | ``status`` | ``collect``."""
 
 from __future__ import annotations
 
@@ -85,6 +85,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
+    example = sub.add_parser(
+        "example",
+        help="List the bundled campaign templates, or write one out to start from",
+        description=(
+            "With no NAME, list the bundled campaign templates. With NAME, print "
+            "that template to stdout, or write it to FILE with -o."
+        ),
+    )
+    example.add_argument("name", nargs="?", help="Template name, e.g. Al_tutorial")
+    example.add_argument("-o", "--output", metavar="FILE",
+                         help="Write the template to FILE instead of stdout")
+    example.add_argument("--force", action="store_true",
+                         help="Overwrite FILE if it already exists")
+
     gen = sub.add_parser("gen", help="PyXtal spacegroup x stoichiometry scan -> POSCARs + manifest")
     gen.add_argument("config", help="Campaign YAML")
     gen.add_argument("--no-progress", action="store_true", help="Suppress the progress bar")
@@ -117,6 +131,28 @@ def build_parser() -> argparse.ArgumentParser:
     _add_override_flags(collect)
 
     return parser
+
+
+def _cmd_example(args) -> int:
+    from .examples import list_templates, template_description, template_text, write_template
+
+    if not args.name:
+        names = list_templates()
+        width = max(len(n) for n in names)
+        for name in names:
+            print(f"{name:<{width}}  {template_description(name)}")
+        return 0
+    try:
+        if args.output:
+            path = write_template(args.name, args.output, force=args.force)
+            print(f"wrote {path}")
+        else:
+            sys.stdout.write(template_text(args.name))
+    except (KeyError, FileExistsError) as exc:
+        message = exc.args[0] if isinstance(exc, KeyError) else exc
+        print(f"error: {message}", file=sys.stderr)
+        return 2
+    return 0
 
 
 def _cmd_gen(args) -> int:
@@ -178,7 +214,13 @@ def _cmd_collect(args) -> int:
     return 0
 
 
-_COMMANDS = {"gen": _cmd_gen, "run": _cmd_run, "status": _cmd_status, "collect": _cmd_collect}
+_COMMANDS = {
+    "example": _cmd_example,
+    "gen": _cmd_gen,
+    "run": _cmd_run,
+    "status": _cmd_status,
+    "collect": _cmd_collect,
+}
 
 
 def main(argv=None) -> int:

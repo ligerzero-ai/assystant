@@ -4,7 +4,35 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
-## [0.1.0] - Unreleased
+## [0.1.1] - Unreleased
+
+### Added
+
+- `assystant example [NAME] [-o FILE]`: lists the campaign templates bundled
+  in the wheel, or writes one out. `Al_tutorial` is a portable copy of
+  `examples/Al_tutorial.yaml`, so `pip install assystant` users get the
+  tutorial without a repository checkout.
+- A real `run` (not `--dry-run`) refuses to submit while any config value is
+  still an `"<EDIT ...>"` template placeholder. The staleness guard ignores a
+  placeholder recorded by an earlier `run --dry-run`, so filling one in
+  afterwards does not demand `--from-scratch`.
+- Python 3.14 support: `requires-python` is now `>=3.11,<3.15`, with a
+  3.14 classifier and a 3.14 leg in the clean-install CI matrix.
+
+### Changed
+
+- `root` is no longer required: when unset it defaults to the current working
+  directory. Configs that set `root` behave exactly as before.
+- README and installation quick start use the bundled template:
+  `assystant example Al_tutorial -o camp.yaml`, then `gen` and
+  `run --dry-run`, with no `--root` / `--env` flags.
+
+### Removed
+
+- The installation notes for installing before `pyiron_workflow_vasp` 0.2.0
+  and `pyiron_workflow_assyst` 0.2.0 were on PyPI; both are released.
+
+## [0.1.0]
 
 Initial release.
 
