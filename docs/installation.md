@@ -62,6 +62,14 @@ pixi add python=3.12
 pixi add --pypi assystant
 ```
 
+With pixi, keep the scientific stack on the PyPI side, as above. If you also
+add conda-forge packages that the chain constrains (`numpy`, `scipy`,
+`matplotlib`, ...), pixi solves the conda side first and does not backtrack
+from PyPI constraints, so bound them yourself to what
+`pyiron_workflow_atomistics` 0.2.2 accepts, e.g.
+`pixi add "numpy<2.5" "scipy>=1.17.1,<1.18" "matplotlib-base>=3.11.2,<3.12"`.
+Otherwise the PyPI solve fails with "pinned by the conda solve" errors.
+
 Python 3.13 needs `pyiron_workflow_vasp` 0.2.0 or later, the first release
 declaring `requires-python <3.14`; with 0.1.x `pip` refuses 3.13.
 
@@ -106,6 +114,15 @@ directory and point the installer at it:
 python -m pip install --find-links wheelhouse/ assystant
 # or
 uv pip install --find-links wheelhouse/ assystant
+```
+
+With pixi, put the wheelhouse in `pixi.toml`. Setting `find-links` makes pixi
+(0.68) stop using PyPI unless you name it again:
+
+```toml
+[pypi-options]
+index-url = "https://pypi.org/simple"
+find-links = [{ path = "wheelhouse" }]
 ```
 
 Once both are released this section goes away.
