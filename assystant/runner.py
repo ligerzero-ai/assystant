@@ -13,6 +13,7 @@ one structure.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -20,7 +21,29 @@ from .config import CampaignConfig, ConfigError
 from .incar import build_incar, build_static_incar
 from .submit import RESULT_FILENAME, build_vasp_command
 
-__all__ = ["assyst_kwargs", "run_structure", "main", "STATIC_INCAR_MIN_VERSION"]
+__all__ = [
+    "assyst_kwargs",
+    "run_structure",
+    "main",
+    "STATIC_INCAR_MIN_VERSION",
+    "apply_potcar_config",
+]
+
+
+def apply_potcar_config(cfg: CampaignConfig, environ=os.environ) -> str | None:
+    """Point ``pyiron_workflow_vasp`` at ``vasp.potcar_config``, if set.
+
+    The library reads ``PYIRON_VASP_CONFIG`` into a module constant at import
+    time, so this must run before anything imports it -- which is why it is
+    called first thing in :func:`main`, and why the rendered job script exports
+    the same variable (for running the script by hand).
+    """
+    path = cfg.vasp.potcar_config
+    if not path:
+        return None
+    environ["PYIRON_VASP_CONFIG"] = str(path)
+    return str(path)
+
 
 #: First pyiron_workflow_assyst release whose ``run_ASSYST_on_structure`` takes
 #: ``static_incar``.  Older releases derive the statics INCAR themselves, from
@@ -148,6 +171,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     cfg = CampaignConfig.from_yaml(args.config)
+    apply_potcar_config(cfg)
     run = run_structure(cfg, Path(args.poscar), Path(args.run_dir), args.system)
     frame = run.outputs.train_df
     print(f"ASSYST finished: {len(frame)} rows -> {Path(args.run_dir) / RESULT_FILENAME}")

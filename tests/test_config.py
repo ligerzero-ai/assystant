@@ -334,3 +334,101 @@ def test_staleness_catches_a_changed_label_incar(campaign_dict):
     campaign_dict["incar_static"] = {"KSPACING": 0.2}
     new = CampaignConfig.from_dict(campaign_dict).resolve().dump()
     assert config_differences(new, recorded) == ["incar_static.KSPACING"]
+
+
+# -- magmom.moments ------------------------------------------------------------
+def test_magmom_moments_parse_and_validate(campaign_dict):
+    campaign_dict["magmom"]["moments"] = {"Fe": 2.8, "C": 0}
+    cfg = CampaignConfig.from_dict(campaign_dict).resolve()
+    assert cfg.magmom.moments == {"Fe": 2.8, "C": 0}
+    campaign_dict["magmom"]["moments"] = {"Xx": 1.0}
+    with pytest.raises(ConfigError, match="magmom.moments"):
+        CampaignConfig.from_dict(campaign_dict).resolve()
+    campaign_dict["magmom"]["moments"] = {"Fe": "big"}
+    with pytest.raises(ConfigError, match="magmom.moments.Fe"):
+        CampaignConfig.from_dict(campaign_dict).resolve()
+
+
+# -- site files ----------------------------------------------------------------
+def test_site_file_merges_over_the_campaign(campaign_dict, tmp_path):
+    camp = tmp_path / "camp.yaml"
+    camp.write_text(yaml.safe_dump(campaign_dict))
+    site = tmp_path / "site.yaml"
+    site.write_text(
+        yaml.safe_dump(
+            {
+                "slurm": {"partition": "gpu", "account": "proj1"},
+                "vasp": {
+                    "binary": "/sw/vasp_std",
+                    "modules": ["a/1"],
+                    "potcar_config": "/sw/potcars.cfg",
+                },
+            }
+        )
+    )
+    cfg = CampaignConfig.from_yaml(camp, [site]).resolve()
+    assert cfg.slurm.partition == "gpu" and cfg.slurm.account == "proj1"
+    assert cfg.slurm.ntasks == 64  # untouched campaign value survives a partial `slurm` section
+    assert cfg.vasp.binary == "/sw/vasp_std" and cfg.vasp.modules == ["a/1"]
+    assert cfg.vasp.potcar_config == "/sw/potcars.cfg"
+    assert cfg.incar["ENCUT"] == 400  # physics untouched
+    # a second site file wins over the first; CLI overrides still beat both
+    site2 = tmp_path / "site2.yaml"
+    site2.write_text(yaml.safe_dump({"slurm": {"partition": "debug"}}))
+    assert CampaignConfig.from_yaml(camp, [site, site2]).resolve().slurm.partition == "debug"
+    assert (
+        CampaignConfig.from_yaml(camp, [site, site2])
+        .resolve({"slurm.partition": "x"})
+        .slurm.partition
+        == "x"
+    )
+
+
+def test_missing_site_file_is_a_config_error(campaign_dict, tmp_path):
+    camp = tmp_path / "camp.yaml"
+    camp.write_text(yaml.safe_dump(campaign_dict))
+    with pytest.raises(ConfigError, match="site config not found"):
+        CampaignConfig.from_yaml(camp, [tmp_path / "nope.yaml"])
+
+
+# -- environment expansion -----------------------------------------------------
+def test_environment_variables_expand_in_machine_sections(campaign_dict, monkeypatch, tmp_path):
+    monkeypatch.setenv("VASP_STD", "/opt/vasp/6.4/bin/vasp_std")
+    monkeypatch.setenv("MYPART", "s.cmmg")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    campaign_dict["vasp"]["binary"] = "${VASP_STD}"
+    campaign_dict["vasp"]["modules"] = ["intel/$MYPART"]
+    campaign_dict["vasp"]["potcar_config"] = "~/potcars/config"
+    campaign_dict["slurm"]["partition"] = "$MYPART"
+    campaign_dict["incar"]["SYSTEM"] = "$NOT_EXPANDED"  # incar is physics, left alone
+    cfg = CampaignConfig.from_dict(campaign_dict).resolve()
+    assert cfg.vasp.binary == "/opt/vasp/6.4/bin/vasp_std"
+    assert cfg.vasp.modules == ["intel/s.cmmg"]
+    assert cfg.vasp.potcar_config == str(tmp_path / "potcars/config")
+    assert cfg.slurm.partition == "s.cmmg"
+    assert cfg.incar["SYSTEM"] == "$NOT_EXPANDED"
+    assert cfg.dump()["vasp"]["binary"] == "/opt/vasp/6.4/bin/vasp_std"  # recorded expanded
+
+
+def test_unset_environment_variable_is_an_error_naming_the_key(campaign_dict, monkeypatch):
+    monkeypatch.delenv("DEFINITELY_UNSET_VAR", raising=False)
+    campaign_dict["vasp"]["binary"] = "${DEFINITELY_UNSET_VAR}/vasp_std"
+    with pytest.raises(ConfigError, match=r"`vasp.binary` references environment variable"):
+        CampaignConfig.from_dict(campaign_dict).resolve()
+
+
+def test_placeholders_are_not_expanded(campaign_dict):
+    campaign_dict["vasp"]["binary"] = "<EDIT: $HOME/vasp_std>"
+    assert CampaignConfig.from_dict(campaign_dict).resolve().vasp.binary == "<EDIT: $HOME/vasp_std>"
+
+
+# -- staleness: keys an older recording lacks ----------------------------------
+def test_keys_added_after_a_recording_are_not_stale_when_default(campaign_dict):
+    new = CampaignConfig.from_dict(campaign_dict).resolve().dump()
+    recorded = copy.deepcopy(new)
+    del recorded["vasp"]["potcar_config"]
+    del recorded["magmom"]["moments"]
+    assert config_differences(new, recorded) == []
+    campaign_dict["magmom"]["moments"] = {"Fe": 2.5}
+    changed = CampaignConfig.from_dict(campaign_dict).resolve().dump()
+    assert config_differences(changed, recorded) == ["magmom.moments"]

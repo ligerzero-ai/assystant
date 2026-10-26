@@ -110,7 +110,9 @@ def test_vasp_command_uses_custodian_when_enabled(cfg):
 def test_vasp_command_without_custodian_is_a_bare_srun(cfg):
     command = build_vasp_command(cfg.resolve({"vasp.custodian": False}))
     assert "custodian" not in command
-    assert command.strip().endswith("srun -c 1 -n 64 --hint=nomultithread /opt/vasp/bin/vasp_std >> vasp.log")
+    assert command.strip().endswith(
+        "srun -c 1 -n 64 --hint=nomultithread /opt/vasp/bin/vasp_std >> vasp.log"
+    )
 
 
 # -- vasp.launcher ----------------------------------------------------------
@@ -139,11 +141,13 @@ def test_launcher_empty_string_yields_a_bare_binary_invocation(cfg):
 
 
 def test_launcher_ntasks_placeholder_is_substituted(cfg):
-    changed = cfg.resolve({
-        "vasp.custodian": False,
-        "vasp.launcher": "mpirun -n {ntasks} --bind-to core",
-        "slurm.ntasks": 32,
-    })
+    changed = cfg.resolve(
+        {
+            "vasp.custodian": False,
+            "vasp.launcher": "mpirun -n {ntasks} --bind-to core",
+            "slurm.ntasks": 32,
+        }
+    )
     command = build_vasp_command(changed)
     lines = [line for line in command.splitlines() if "vasp_std" in line]
     assert lines == ["mpirun -n 32 --bind-to core /opt/vasp/bin/vasp_std >> vasp.log"]
@@ -156,19 +160,28 @@ def test_get_user_env_directive_takes_no_argument(cfg, tmp_path):
     accepted. No injected `submit_fn` can catch this, because the tests never
     invoke sbatch; it has to be pinned on the rendered text."""
     script = render_sbatch(
-        cfg, run_dir=tmp_path / "d", poscar=tmp_path / "p.vasp", system="Fe",
-        job_name="j", config_path=tmp_path / "c.yaml",
+        cfg,
+        run_dir=tmp_path / "d",
+        poscar=tmp_path / "p.vasp",
+        system="Fe",
+        job_name="j",
+        config_path=tmp_path / "c.yaml",
     )
     assert "#SBATCH --get-user-env\n" in script
     assert "--get-user-env=" not in script
 
 
 def test_render_sbatch_honours_extra_directives_and_account(cfg, tmp_path):
-    changed = cfg.resolve({"slurm.account": "pawsey0380",
-                           "slurm.extra_directives": ["--reservation=benchmarking"]})
+    changed = cfg.resolve(
+        {"slurm.account": "pawsey0380", "slurm.extra_directives": ["--reservation=benchmarking"]}
+    )
     script = render_sbatch(
-        changed, run_dir=tmp_path / "d", poscar=tmp_path / "p.vasp", system="Fe",
-        job_name="j", config_path=tmp_path / "c.yaml",
+        changed,
+        run_dir=tmp_path / "d",
+        poscar=tmp_path / "p.vasp",
+        system="Fe",
+        job_name="j",
+        config_path=tmp_path / "c.yaml",
     )
     assert "#SBATCH --account=pawsey0380" in script
     assert "#SBATCH --reservation=benchmarking" in script
@@ -256,7 +269,9 @@ def test_from_scratch_wipes_the_run_dir_including_the_cache(generated_campaign):
 
     recorder = Recorder()
     submit_campaign(
-        cfg.resolve({"incar.ENCUT": 500}), submit_fn=recorder, queued_dirs=set(),
+        cfg.resolve({"incar.ENCUT": 500}),
+        submit_fn=recorder,
+        queued_dirs=set(),
         from_scratch=True,
     )
 
@@ -321,8 +336,12 @@ def test_from_scratch_records_the_new_config(generated_campaign):
 
     cfg, _ = generated_campaign
     submit_campaign(cfg, submit_fn=Recorder(), queued_dirs=set())
-    submit_campaign(cfg.resolve({"incar.ENCUT": 500}), submit_fn=Recorder(),
-                    queued_dirs=set(), from_scratch=True)
+    submit_campaign(
+        cfg.resolve({"incar.ENCUT": 500}),
+        submit_fn=Recorder(),
+        queued_dirs=set(),
+        from_scratch=True,
+    )
     assert load_recorded_config(cfg.root)["incar"]["ENCUT"] == 500
 
 
@@ -377,7 +396,9 @@ def test_cli_dry_run_from_scratch_reports_would_delete_without_deleting(
     # Both structures already have a run_dir from the real submit_campaign
     # call above, so both are reported as "would delete".
     assert "would delete 2" in out
-    assert (run_dir / RESULT_FILENAME).is_file(), "CLI dry-run --from-scratch deleted a finished result"
+    assert (
+        run_dir / RESULT_FILENAME
+    ).is_file(), "CLI dry-run --from-scratch deleted a finished result"
 
 
 def test_cli_reports_staleness_as_an_error_exit(generated_campaign, tmp_path, monkeypatch):
@@ -400,3 +421,77 @@ def test_cli_reports_staleness_as_an_error_exit(generated_campaign, tmp_path, mo
     before = len(recorder.calls)
     assert cli_main(["run", str(path)]) == 2
     assert len(recorder.calls) == before
+
+
+# -- POTCAR config pinned into the job ------------------------------------
+def test_render_sbatch_exports_potcar_config_when_set(cfg, tmp_path):
+    plain = render_sbatch(
+        cfg,
+        run_dir=tmp_path / "d",
+        poscar=tmp_path / "p.vasp",
+        system="Fe",
+        job_name="j",
+        config_path=tmp_path / "c.yaml",
+    )
+    assert "PYIRON_VASP_CONFIG" not in plain
+    changed = cfg.resolve({"vasp.potcar_config": "/sw/potcars/pyiron_vasp_config"})
+    script = render_sbatch(
+        changed,
+        run_dir=tmp_path / "d",
+        poscar=tmp_path / "p.vasp",
+        system="Fe",
+        job_name="j",
+        config_path=tmp_path / "c.yaml",
+    )
+    assert "export PYIRON_VASP_CONFIG=/sw/potcars/pyiron_vasp_config\n" in script
+    assert script.index("module purge") < script.index("export PYIRON_VASP_CONFIG")
+    assert script.index("export PYIRON_VASP_CONFIG") < script.index("assystant.runner")
+
+
+def test_runner_applies_potcar_config_to_the_environment(cfg):
+    from assystant.runner import apply_potcar_config
+
+    env = {}
+    assert apply_potcar_config(cfg, env) is None and env == {}
+    changed = cfg.resolve({"vasp.potcar_config": "/sw/potcars/pyiron_vasp_config"})
+    assert apply_potcar_config(changed, env) == "/sw/potcars/pyiron_vasp_config"
+    assert env["PYIRON_VASP_CONFIG"] == "/sw/potcars/pyiron_vasp_config"
+
+
+def test_cli_site_flag_reaches_the_rendered_script(campaign_dict, tmp_path, capsys):
+    import yaml
+
+    from assystant.generate import write_system
+    from conftest import bcc_fe, record_for
+
+    camp = tmp_path / "camp.yaml"
+    camp.write_text(yaml.safe_dump(campaign_dict))
+    site = tmp_path / "site.yaml"
+    site.write_text(
+        yaml.safe_dump(
+            {
+                "slurm": {"partition": "sitepart"},
+                "vasp": {"binary": "/site/vasp_std", "potcar_config": str(tmp_path / "cfg")},
+            }
+        )
+    )
+    (tmp_path / "cfg").write_text("default_POTCAR_set = potpaw64\n")
+    root = campaign_dict["root"]
+    write_system(root, ["Fe"], [record_for(bcc_fe())])
+    assert cli_main(["run", str(camp), "--site", str(site), "--dry-run"]) == 0
+    script = next(Path(root).glob("Fe/struct_*/" + JOB_SCRIPT_NAME)).read_text()
+    assert "#SBATCH --partition=sitepart" in script
+    assert f"export PYIRON_VASP_CONFIG={tmp_path / 'cfg'}" in script
+    recorded = yaml.safe_load((Path(root) / "assystant_config.yaml").read_text())
+    assert recorded["vasp"]["binary"] == "/site/vasp_std"
+
+
+def test_missing_potcar_config_file_warns_but_renders(generated_campaign, capsys):
+    cfg, _ = generated_campaign
+    changed = cfg.resolve({"vasp.potcar_config": "/nowhere/pyiron_vasp_config"})
+    stats = submit_campaign(changed, dry_run=True, submit_fn=Recorder(), queued_dirs=set())
+    assert len(stats["rendered"]) == 2
+    assert (
+        "Warning: vasp.potcar_config /nowhere/pyiron_vasp_config does not exist"
+        in capsys.readouterr().err
+    )

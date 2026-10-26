@@ -8,6 +8,28 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `docs/new-machine.md`: setting up on a new cluster step by step — POTCAR
+  library, VASP binary / modules / launcher / custodian, SLURM, one site file
+  per machine, moments per element, smoke test, first campaign.
+- `--site FILE` on every campaign command: a machine-specific YAML (`slurm`,
+  `vasp`, perhaps `root`) deep-merged over the campaign YAML before overrides,
+  repeatable, later files winning. Precedence is CLI flag > site file(s) >
+  campaign YAML > defaults. `assystant example site` writes a starting site
+  file with `"<EDIT ...>"` placeholders.
+- `${VAR}` / `$VAR` / leading `~` expansion in `root`, `slurm` and `vasp`
+  values. An unset variable is a `ConfigError` naming the key, raised by every
+  command including `gen`. The recorded config holds the expanded values.
+- `vasp.potcar_config`: pins the `pyiron_workflow_vasp` POTCAR configuration
+  file. The rendered job script exports `PYIRON_VASP_CONFIG` and the in-job
+  runner sets it before the library is imported; `run` warns when the file
+  does not exist on the login node.
+- `magmom.moments`: per-element initial moments (`{Mn: -2.0, C: 0.0}`), applied
+  in every system and taking precedence over the host / solute rule, so a
+  multi-element campaign can give each solute its own moment.
+- The staleness guard treats a key the recorded config predates
+  (`vasp.potcar_config`, `magmom.moments`, `incar_static`) as its empty
+  default, so upgrading never by itself makes a campaign stale.
+
 - `docs/multi-element.md`: a guide to campaigns over several elements — the
   two shapes of `system.species` (several systems vs. one multi-component
   system), the stoichiometry scan and its size, per-system `magmom.host`

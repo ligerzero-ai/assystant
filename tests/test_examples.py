@@ -45,12 +45,8 @@ def test_al_tutorial_is_bundled_with_the_package():
 
 def test_alcu_tutorial_is_three_systems_sharing_the_al_scan(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    alcu = CampaignConfig.from_dict(
-        yaml.safe_load(template_text("AlCu_tutorial"))
-    ).resolve()
-    al = CampaignConfig.from_dict(
-        yaml.safe_load(template_text("Al_tutorial"))
-    ).resolve()
+    alcu = CampaignConfig.from_dict(yaml.safe_load(template_text("AlCu_tutorial"))).resolve()
+    al = CampaignConfig.from_dict(yaml.safe_load(template_text("Al_tutorial"))).resolve()
     assert alcu.system.systems == [["Al"], ["Cu"], ["Al", "Cu"]]
     assert alcu.system_names() == ["Al", "Cu", "Al_Cu"]
     # Same scan parameters and seed as Al_tutorial, so the Al system reproduces
@@ -83,13 +79,9 @@ def test_templates_carry_no_site_specific_paths():
 
 
 # -- defaults that make the template portable -----------------------------
-def test_template_resolves_relative_to_cwd_with_running_interpreter(
-    tmp_path, monkeypatch
-):
+def test_template_resolves_relative_to_cwd_with_running_interpreter(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    cfg = CampaignConfig.from_dict(
-        yaml.safe_load(template_text("Al_tutorial"))
-    ).resolve()
+    cfg = CampaignConfig.from_dict(yaml.safe_load(template_text("Al_tutorial"))).resolve()
     assert Path(cfg.root) == (tmp_path / "Al_campaign").resolve()
     assert cfg.slurm.env is None
     assert cfg.slurm.python_executable() == sys.executable
@@ -112,9 +104,7 @@ def test_explicit_root_is_unchanged(campaign_dict, tmp_path):
 
 def test_placeholder_fields(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    cfg = CampaignConfig.from_dict(
-        yaml.safe_load(template_text("Al_tutorial"))
-    ).resolve()
+    cfg = CampaignConfig.from_dict(yaml.safe_load(template_text("Al_tutorial"))).resolve()
     assert placeholder_fields(cfg) == ["slurm.partition", "vasp.binary"]
     filled = cfg.resolve({"slurm.partition": "debug", "vasp.binary": "/opt/vasp_std"})
     assert placeholder_fields(filled) == []
@@ -124,9 +114,7 @@ def test_placeholder_fields(tmp_path, monkeypatch):
 @pytest.fixture
 def template_campaign(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    cfg = CampaignConfig.from_dict(
-        yaml.safe_load(template_text("Al_tutorial"))
-    ).resolve()
+    cfg = CampaignConfig.from_dict(yaml.safe_load(template_text("Al_tutorial"))).resolve()
     write_system(cfg.root, ["Al"], [record_for(fcc_al(), spacegroup=225)])
     return cfg
 
@@ -142,9 +130,7 @@ def test_template_dry_run_renders_with_running_interpreter(template_campaign):
 def test_real_run_refuses_placeholders(template_campaign):
     submitted = []
     with pytest.raises(ConfigError, match="slurm.partition, vasp.binary"):
-        submit_campaign(
-            template_campaign, queued_dirs=set(), submit_fn=submitted.append
-        )
+        submit_campaign(template_campaign, queued_dirs=set(), submit_fn=submitted.append)
     assert submitted == []
 
 
@@ -215,3 +201,20 @@ def test_filling_placeholders_after_dry_run_is_not_stale(template_campaign):
             queued_dirs=set(),
             submit_fn=submitted.append,
         )
+
+
+# -- the site template ----------------------------------------------------
+def test_site_template_merges_over_a_campaign_and_leaves_placeholders(tmp_path, monkeypatch):
+    from assystant.config import load_campaign_dict
+
+    monkeypatch.chdir(tmp_path)
+    assert "site" in list_templates()
+    camp = write_template("Al_tutorial", tmp_path / "camp.yaml")
+    site = write_template("site", tmp_path / "site.yaml")
+    data = yaml.safe_load(template_text("site"))
+    assert set(data) <= {"root", "slurm", "vasp"}  # a site file is machine-only
+    cfg = CampaignConfig.from_dict(load_campaign_dict(camp, [site])).resolve()
+    assert cfg.system.systems == [["Al"]]  # physics from the campaign
+    assert cfg.vasp.custodian is True  # machine section from the site file
+    assert placeholder_fields(cfg) == ["slurm.partition", "vasp.binary", "vasp.potcar_config"]
+    assert main(["run", str(camp), "--site", str(site), "--dry-run", "--limit", "1"]) in (0, 2)

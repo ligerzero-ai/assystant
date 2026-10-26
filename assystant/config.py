@@ -19,6 +19,8 @@ The YAML schema is documented in ``docs/2026_07_31_assystant_design.md`` (sectio
 from __future__ import annotations
 
 import copy
+import os
+import re
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -42,6 +44,9 @@ __all__ = [
     "load_recorded_config",
     "calculation_key",
     "config_differences",
+    "merge_site",
+    "load_campaign_dict",
+    "expand_environment",
     "enumerate_compositions",
     "resolve_stoich_range",
 ]
@@ -283,9 +288,23 @@ class MagmomConfig:
     host: Any = None
     host_moment: float = 3.0
     solute_moment: float = -0.5
+    #: Per-element initial moments, ``{Fe: 3.0, Mn: -2.0, C: 0.0}``.  An element
+    #: listed here gets that moment in every system; one not listed falls back
+    #: to the host / solute rule.  This is what lets a multi-element campaign
+    #: give each solute its own moment instead of one ``solute_moment`` for all.
+    moments: Any = None
+
+    def __post_init__(self):
+        self.moments = {str(k): v for k, v in (self.moments or {}).items()}
 
     def host_for(self, species: list[str]) -> str:
         return self.host if self.host is not None else species[0]
+
+    def moment_for(self, element: str, host: str) -> float:
+        """Initial moment for ``element`` given the system's resolved ``host``."""
+        if element in self.moments:
+            return float(self.moments[element])
+        return float(self.host_moment if element == host else self.solute_moment)
 
 
 @dataclass
@@ -359,6 +378,13 @@ class VaspConfig:
     #: smoke test, or ``""`` to invoke the binary with no launcher at all.
     #: ``{ntasks}`` in the string is substituted with the effective task count.
     launcher: Any = None
+    #: The POTCAR configuration file ``pyiron_workflow_vasp`` reads (the file
+    #: otherwise looked up as ``$PYIRON_VASP_CONFIG`` or
+    #: ``~/.pyiron_vasp_config``).  ``null`` leaves that lookup alone; a path
+    #: pins it: the rendered job script exports ``PYIRON_VASP_CONFIG`` and the
+    #: in-job runner sets it before the library is imported, so the campaign
+    #: no longer depends on the submitting shell's environment or home directory.
+    potcar_config: Any = None
 
 
 @dataclass
@@ -407,12 +433,9 @@ class CampaignConfig:
         )
 
     @classmethod
-    def from_yaml(cls, path) -> "CampaignConfig":
-        path = Path(path)
-        if not path.is_file():
-            raise ConfigError(f"campaign config not found: {path}")
-        with path.open() as fh:
-            return cls.from_dict(yaml.safe_load(fh) or {})
+    def from_yaml(cls, path, sites=()) -> "CampaignConfig":
+        """Load ``path``; ``sites`` are site YAMLs merged over it, in order."""
+        return cls.from_dict(load_campaign_dict(path, sites))
 
     # -- overrides and validation ----------------------------------------
     def resolve(self, overrides: dict | None = None) -> "CampaignConfig":
@@ -429,9 +452,26 @@ class CampaignConfig:
             if value is None:
                 continue
             out._set_dotted(dotted, value)
+        out._expand_environment()
         out.root = str(Path(out.root or DEFAULT_ROOT).expanduser().resolve())
         out.validate()
         return out
+
+    def _expand_environment(self) -> None:
+        """``${VAR}`` / ``$VAR`` / leading ``~`` in the machine-specific sections.
+
+        Applied to ``root`` and to every string in ``slurm`` and ``vasp`` (list
+        items included), so one campaign YAML can say
+        ``binary: ${VASP_STD}`` and be submitted from several machines.  An
+        unset variable is an error, not an empty string: a silently empty
+        ``vasp.binary`` would only fail inside the allocation.
+        """
+        self.root = expand_environment(self.root, "root")
+        for section in ("slurm", "vasp"):
+            obj = getattr(self, section)
+            for fld in fields(obj):
+                value = getattr(obj, fld.name)
+                setattr(obj, fld.name, expand_environment(value, f"{section}.{fld.name}"))
 
     def _set_dotted(self, dotted: str, value) -> None:
         parts = dotted.split(".")
@@ -507,6 +547,7 @@ class CampaignConfig:
 
         _validate_ibrion(self.incar, a.ionic_steps)
         _validate_incar_static(self.incar_static)
+        _validate_moments(self.magmom.moments)
 
         if f.min_dist_backend not in ("neighbor_list", "mic"):
             raise ConfigError(
@@ -659,6 +700,89 @@ def effective_static_overrides(overrides: dict | None) -> dict:
     return merged
 
 
+def _validate_moments(moments: dict) -> None:
+    for symbol, value in (moments or {}).items():
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise ConfigError(
+                f"`magmom.moments.{symbol}` must be a number (initial moment in muB), "
+                f"got {value!r}"
+            )
+    try:
+        from pymatgen.core.periodic_table import Element
+    except Exception:  # pragma: no cover - pymatgen always present in practice
+        return
+    for symbol in moments or {}:
+        try:
+            Element(symbol)
+        except Exception:
+            raise ConfigError(f"unknown element symbol in `magmom.moments`: {symbol!r}") from None
+
+
+_ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def expand_environment(value, path: str):
+    """Expand ``${VAR}`` / ``$VAR`` and a leading ``~`` in ``value``.
+
+    Strings are expanded; lists and tuples element-wise; anything else (and a
+    ``<EDIT ...>`` placeholder) is returned unchanged.  A reference to an unset
+    variable raises :class:`ConfigError` naming the config path.
+    """
+    if isinstance(value, (list, tuple)):
+        return [expand_environment(v, f"{path}[{i}]") for i, v in enumerate(value)]
+    if not isinstance(value, str) or value.strip().startswith(PLACEHOLDER_PREFIX):
+        return value
+
+    def sub(match):
+        name = match.group(1) or match.group(2)
+        if name not in os.environ:
+            raise ConfigError(
+                f"`{path}` references environment variable ${{{name}}}, which is not "
+                "set in this shell. Export it, or write the value out."
+            )
+        return os.environ[name]
+
+    expanded = _ENV_REF.sub(sub, value)
+    if expanded.startswith("~"):
+        expanded = os.path.expanduser(expanded)
+    return expanded
+
+
+def merge_site(campaign: dict, site: dict) -> dict:
+    """Deep-merge ``site`` over ``campaign``: mappings recurse, anything else is replaced.
+
+    This is what ``--site`` does.  A site file carries what is specific to one
+    machine -- ``slurm``, ``vasp``, perhaps ``root`` -- so the campaign YAML can
+    stay pure physics and be submitted unchanged from several clusters.
+    """
+    out = dict(campaign)
+    for key, value in (site or {}).items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = merge_site(out[key], value)
+        else:
+            out[key] = copy.deepcopy(value)
+    return out
+
+
+def load_campaign_dict(path, sites=()) -> dict:
+    """The campaign YAML as a dict, with each site YAML merged over it in order."""
+
+    def read(p, what):
+        p = Path(p)
+        if not p.is_file():
+            raise ConfigError(f"{what} not found: {p}")
+        with p.open() as fh:
+            data = yaml.safe_load(fh) or {}
+        if not isinstance(data, dict):
+            raise ConfigError(f"{what} must be a mapping, got {type(data).__name__}: {p}")
+        return data
+
+    data = read(path, "campaign config")
+    for site in sites or ():
+        data = merge_site(data, read(site, "site config"))
+    return data
+
+
 def _validate_symbols(systems) -> None:
     try:
         from pymatgen.core.periodic_table import Element
@@ -756,6 +880,10 @@ def _diff(prefix: str, a, b) -> list[str]:
         return out
     if isinstance(b, str) and b.strip().startswith(PLACEHOLDER_PREFIX):
         return []
+    # A key the recorded config predates (e.g. ``vasp.potcar_config``,
+    # ``magmom.moments``) is a null/empty default, not a change.
+    if isinstance(a, _Missing) and _is_empty(b) or isinstance(b, _Missing) and _is_empty(a):
+        return []
     if _canon(a) != _canon(b):
         return [prefix or "<root>"]
     return []
@@ -764,6 +892,10 @@ def _diff(prefix: str, a, b) -> list[str]:
 class _Missing:
     def __repr__(self):  # pragma: no cover - debug aid
         return "<missing>"
+
+
+def _is_empty(value) -> bool:
+    return value is None or value == {} or value == []
 
 
 _MISSING = _Missing()

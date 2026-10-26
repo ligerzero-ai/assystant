@@ -194,8 +194,21 @@ and is only worth doing when the matrix element is not first — but reordering
 the list is the simpler fix, with one caveat: species order is also the
 directory name (`Fe_C` vs `C_Fe`), so pick an order before the first `run`.
 
-For a non-magnetic campaign (`ISPIN: 1`, as in both bundled templates) the
-`magmom` section is never consulted and no MAGMOM is written.
+When different solutes need different moments — Mn and C in iron are not
+both `-1.0` — list them in `magmom.moments`, which applies per element in
+every system and takes precedence over the host / solute rule:
+
+```yaml
+magmom:
+  host: null
+  host_moment: 3.0
+  moments: {Mn: -2.0, C: 0.0}
+```
+
+See [`new-machine.md`](new-machine.md#6-magnetic-moments-per-element).
+
+For a non-magnetic campaign (`ISPIN: 1`, as in the bundled tutorial templates)
+the `magmom` section is never consulted and no MAGMOM is written.
 
 ## Equilibrium volumes for mixed compositions
 
