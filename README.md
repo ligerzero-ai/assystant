@@ -28,6 +28,7 @@ assystant collect camp.yaml -o train.pkl           # one dataframe
 |---|---|
 | [**Overview**](docs/overview.md) | what ASSYST does, what `assystant` adds, how the three repos fit together |
 | [**Installation**](docs/installation.md) | dependencies, install order, the POTCAR config |
+| [**New machine**](docs/new-machine.md) | first setup on a cluster: POTCAR library, VASP binary and modules, SLURM, one site file per machine (`--site`), moments per element |
 | [**Worked example**](docs/worked-example.md) | a complete campaign, start to finish, that you can copy |
 | [**Several elements**](docs/multi-element.md) | many unaries, binaries and ternaries in one campaign: `species`, stoichiometry, `magmom.host`, adding elements later |
 | [**Configuration**](docs/configuration.md) | every YAML key: meaning, default, when to change it |
@@ -73,7 +74,10 @@ To go further — a real `run`, then `status` and `collect` — fill in the
 `"<EDIT ...>"` placeholders in `camp.yaml` (SLURM partition, VASP binary; a real
 `run` refuses to submit while any is left) and set up the
 [POTCAR config](docs/installation.md#the-potcar-library). The campaign is walked
-through in [`docs/worked-example.md`](docs/worked-example.md).
+through in [`docs/worked-example.md`](docs/worked-example.md). On a cluster you
+will use more than once, put the machine-specific parts in a site file instead
+(`assystant example site -o site_mycluster.yaml`, then `--site site_mycluster.yaml`
+on every command) — see [`docs/new-machine.md`](docs/new-machine.md).
 
 The repository's [`examples/`](examples/) directory holds the configs of the
 real MPIE cluster setup, with its absolute paths:
@@ -129,7 +133,7 @@ python -m pip install "assystant[test]"
 pytest tests/ -q
 ```
 
-126 tests. None call SLURM or VASP; `submit_campaign` takes `queued_dirs` and
+158 tests. None call SLURM or VASP; `submit_campaign` takes `queued_dirs` and
 `submit_fn` injection seams for exactly that reason. For an end-to-end check that
 runs real DFT, use [`examples/Fe_smoke.yaml`](examples/Fe_smoke.yaml).
 

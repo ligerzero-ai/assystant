@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import subprocess
 from pathlib import Path
 
 from . import config as config_mod
 from .config import (
+    PLACEHOLDER_PREFIX,
     CampaignConfig,
     ConfigError,
     StaleConfigError,
@@ -46,7 +48,7 @@ __all__ = [
 RESULT_FILENAME = "df_ASSYST_jobs.pkl"
 JOB_SCRIPT_NAME = "assystant_job.sh"
 
-_CUSTODIAN_WRAPPER = '''cat > custodian_vasp.py << 'PYEOF'
+_CUSTODIAN_WRAPPER = """cat > custodian_vasp.py << 'PYEOF'
 import sys
 from custodian.custodian import Custodian
 from custodian.vasp.handlers import (
@@ -65,7 +67,7 @@ handlers = [
 jobs = [VaspJob(sys.argv[1:], output_file=output_filename, suffix="")]
 Custodian(handlers, jobs, max_errors={max_errors}, polling_time_step=3, monitor_freq=1).run()
 PYEOF
-'''
+"""
 
 
 def build_vasp_command(cfg: CampaignConfig, ntasks: int | None = None) -> str:
@@ -138,6 +140,14 @@ def render_sbatch(
             f"--system {system}",
         ]
     )
+    environment = []
+    if cfg.vasp.potcar_config:
+        environment = [
+            "# The POTCAR library pyiron_workflow_vasp reads, pinned by vasp.potcar_config",
+            "# so the job does not depend on the submitting shell or ~/.pyiron_vasp_config.",
+            f"export PYIRON_VASP_CONFIG={cfg.vasp.potcar_config}",
+            "",
+        ]
     body = "\n".join(
         [
             "#!/bin/bash",
@@ -145,6 +155,7 @@ def render_sbatch(
             "",
             "module purge",
             "",
+            *environment,
             "# Run the ASSYST graph for exactly this structure. run_dir is absolute;",
             "# executorlib's cache lives at <run_dir>/executorlib_cache so it is",
             "# scoped to one structure and cannot be shared between two.",
@@ -159,9 +170,7 @@ def squeue_workdirs() -> set[str]:
     """Work directories of the current user's queued/running jobs (``squeue -o %Z``)."""
     user = os.environ.get("USER") or ""
     try:
-        out = subprocess.check_output(
-            ["squeue", "-u", user, "--noheader", "-o", "%Z"], text=True
-        )
+        out = subprocess.check_output(["squeue", "-u", user, "--noheader", "-o", "%Z"], text=True)
     except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
         print(f"Warning: unable to query squeue ({exc}); no jobs will be skipped as queued")
         return set()
@@ -196,6 +205,18 @@ def guard_config(cfg: CampaignConfig, *, from_scratch: bool = False, write: bool
     if write:
         cfg.dump_to(path)
     return path
+
+
+def _warn_missing_potcar_config(cfg: CampaignConfig) -> None:
+    """A heuristic only: the file must exist on the compute nodes, which may not
+    share this filesystem, so a missing file is a warning, not a refusal."""
+    path = cfg.vasp.potcar_config
+    if path and not str(path).strip().startswith(PLACEHOLDER_PREFIX) and not Path(path).is_file():
+        print(
+            f"Warning: vasp.potcar_config {path} does not exist here; every job will "
+            "fail at input-writing time unless it exists on the compute nodes",
+            file=sys.stderr,
+        )
 
 
 def _refuse_placeholders(cfg: CampaignConfig) -> None:
@@ -254,14 +275,19 @@ def submit_campaign(
     """
     if not dry_run:
         _refuse_placeholders(cfg)
+    _warn_missing_potcar_config(cfg)
     config_path = guard_config(cfg, from_scratch=from_scratch, write=True)
     if queued_dirs is None:
         queued_dirs = set() if dry_run else squeue_workdirs()
     submit_fn = submit_fn or _sbatch
 
     stats = {
-        "submitted": 0, "skipped_queued": 0, "skipped_done": 0, "missing": 0,
-        "would_delete": 0, "rendered": [],
+        "submitted": 0,
+        "skipped_queued": 0,
+        "skipped_done": 0,
+        "missing": 0,
+        "would_delete": 0,
+        "rendered": [],
     }
     submitted_total = 0
 

@@ -41,12 +41,22 @@ def stack_element_string(structure):
     return list(element_list), list(element_count)
 
 
-def get_incar_magmom_string(structure, host_ele="Fe", host_magmom=3, solute_magmom=-0.5):
-    """VASP MAGMOM string: ``host_magmom`` on the host, ``solute_magmom`` elsewhere."""
+def get_incar_magmom_string(
+    structure, host_ele="Fe", host_magmom=3, solute_magmom=-0.5, moments=None
+):
+    """VASP MAGMOM string: ``host_magmom`` on the host, ``solute_magmom`` elsewhere.
+
+    ``moments`` (``{element: moment}``) takes precedence for the elements it
+    lists; everything else follows the host / solute rule.
+    """
+    moments = moments or {}
     element_list, element_count = stack_element_string(structure)
     parts = []
     for element, count in zip(element_list, element_count):
-        moment = host_magmom if element == host_ele else solute_magmom
+        if element in moments:
+            moment = moments[element]
+        else:
+            moment = host_magmom if element == host_ele else solute_magmom
         parts.append(f"{count}*{moment}")
     return " ".join(parts)
 
@@ -71,6 +81,7 @@ def build_incar(base_tags: dict, structure, magmom_cfg, system_tag: str, host: s
             host_ele=host,
             host_magmom=magmom_cfg.host_moment,
             solute_magmom=magmom_cfg.solute_moment,
+            moments=getattr(magmom_cfg, "moments", None),
         )
     else:
         incar.pop("MAGMOM", None)

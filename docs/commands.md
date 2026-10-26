@@ -1,8 +1,10 @@
 # Command reference
 
 Four campaign commands, all taking the campaign YAML as their first argument and
-all accepting the [override flags](configuration.md#overrides-and-precedence),
-plus `example`, which writes out a starting YAML.
+all accepting the [override flags](configuration.md#overrides-and-precedence)
+and `--site FILE` (a machine-specific YAML merged over the campaign — see
+[`new-machine.md`](new-machine.md)), plus `example`, which writes out a
+starting YAML.
 
 Every transcript below was executed against the campaign in
 [`worked-example.md`](worked-example.md) and is pasted verbatim.
@@ -26,7 +28,8 @@ Al_tutorial    Unary Al tutorial campaign: 1-4 atoms, cubic spacegroups, minutes
 
 `Al_tutorial` is the campaign in [`worked-example.md`](worked-example.md);
 `AlCu_tutorial` is the same campaign over three systems and is walked through in
-[`multi-element.md`](multi-element.md).
+[`multi-element.md`](multi-element.md); `site` is not a campaign but a
+machine file for `--site`, walked through in [`new-machine.md`](new-machine.md).
 
 With `NAME`, prints that template to stdout, or with `-o FILE` writes it there
 (refusing to overwrite an existing file unless `--force`):

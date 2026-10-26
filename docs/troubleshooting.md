@@ -230,6 +230,15 @@ error: unknown element symbol in `system.species`: 'Xx'
 ```
 
 ```
+error: `vasp.binary` references environment variable ${VASP_ROOT}, which is not
+set in this shell. Export it, or write the value out.
+```
+
+```
+error: site config not found: site_mycluster.yaml
+```
+
+```
 error: `incar_static.ISIF` is not allowed: the accurate statics never relax
 anything, and run_ASSYST_on_structure strips ISIF from their INCAR. ISIF belongs
 in `incar`, where it seeds the ISIF7 stage.
@@ -295,10 +304,14 @@ is the full composition range.
 ## Jobs fail immediately with a POTCAR error
 
 `assystant` never names a POTCAR; `pyiron_workflow_vasp` resolves them from
-`$PYIRON_VASP_CONFIG` or `~/.pyiron_vasp_config`. If that file is missing or
-points at a nonexistent library, every job fails at input-writing time. Verify it
-independently before blaming the campaign — see
-[`installation.md`](installation.md#the-potcar-library).
+`vasp.potcar_config` if set, else `$PYIRON_VASP_CONFIG`, else
+`~/.pyiron_vasp_config`. If that file is missing or points at a nonexistent
+library, every job fails at input-writing time. Verify it independently before
+blaming the campaign — see [`installation.md`](installation.md#the-potcar-library)
+— and pin it with `vasp.potcar_config` so the jobs stop depending on the
+submitting shell. `run` prints
+`Warning: vasp.potcar_config ... does not exist here` when the pinned file is
+missing on the login node.
 
 ---
 

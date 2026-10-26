@@ -31,6 +31,17 @@ OVERRIDE_FLAGS = {
 
 
 def _add_override_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--site",
+        action="append",
+        default=[],
+        metavar="FILE",
+        help=(
+            "Site YAML merged over the campaign YAML before anything else (repeatable; "
+            "later files win). Keeps slurm/vasp/root for one machine apart from the "
+            "physics; `assystant example site` writes a starting one."
+        ),
+    )
     parser.add_argument("--root", help="Override `root` (campaign directory)")
     parser.add_argument("--ntasks", type=int, help="Override `slurm.ntasks`")
     parser.add_argument("--time", help="Override `slurm.time` (HH:MM:SS)")
@@ -85,7 +96,8 @@ def overrides_from_args(args) -> dict:
 
 
 def load_config(args) -> CampaignConfig:
-    return CampaignConfig.from_yaml(args.config).resolve(overrides_from_args(args))
+    sites = getattr(args, "site", None) or []
+    return CampaignConfig.from_yaml(args.config, sites).resolve(overrides_from_args(args))
 
 
 def build_parser() -> argparse.ArgumentParser:

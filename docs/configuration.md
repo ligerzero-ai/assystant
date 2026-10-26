@@ -42,6 +42,26 @@ and `--set vasp.modules="[]"` an empty list. One caveat: an override whose value
 resolves to `null` is *skipped*, not applied — `--set incar.IBRION=null` will not
 remove `IBRION` from your INCAR. Delete the key from the YAML instead.
 
+### Site files: `--site FILE`
+
+A second YAML merged over the campaign YAML before anything else, so what is
+specific to one machine — `slurm`, `vasp`, perhaps `root` — stays out of the
+physics file. Nested mappings merge key by key, scalars and lists are
+replaced, and the flag repeats (later files win). Full precedence:
+**CLI flag > site file(s) > campaign YAML > defaults**.
+`assystant example site` writes a starting site file;
+[`new-machine.md`](new-machine.md) is the walkthrough.
+
+### Environment variables
+
+`${VAR}`, `$VAR` and a leading `~` are expanded in `root` and in every string
+of `slurm` and `vasp` (list items included), after overrides and before
+validation, so `binary: ${VASP_ROOT}/bin/vasp_std` works. The physics sections
+are left alone. A reference to an unset variable is a `ConfigError` naming the
+key, raised by every command including `gen`, because an empty `vasp.binary`
+would otherwise fail only inside the allocation. The recorded config holds the
+expanded values.
+
 ## `root`
 
 Default: the current working directory. The campaign directory. Everything the
@@ -309,6 +329,7 @@ magmom:
   host: null
   host_moment: 3.0
   solute_moment: -0.5
+  moments: {}
 ```
 
 Only consulted when `incar.ISPIN` is 2. The MAGMOM string is built positionally
@@ -329,6 +350,14 @@ every system in the file. See
 µB for the host and for everything else. Note that
 [`examples/Fe_unary.yaml`](../examples/Fe_unary.yaml) uses `-1.0` for the solute;
 the dataclass default is `-0.5`.
+
+**`moments`** — default `{}`. Per-element initial moments,
+`{Mn: -2.0, C: 0.0}`, applied in every system of the campaign. An element
+listed here gets that value wherever it appears; one not listed follows the
+host / solute rule. This is how a multi-element campaign gives each solute its
+own moment instead of one `solute_moment` for all, and listing every element
+makes the rule irrelevant. Symbols are validated; values must be numbers. See
+[`new-machine.md`](new-machine.md#6-magnetic-moments-per-element).
 
 ## `assyst` — the ASSYST graph parameters
 
@@ -473,6 +502,7 @@ vasp:
   modules: [intel/2024.0, impi/2021.11, mkl/2024.0]
   max_errors: 10
   launcher: null
+  potcar_config: null
 ```
 
 **`binary`** — default `vasp_std`; required to be non-empty. Write an absolute
@@ -506,6 +536,17 @@ the runner environment: the example config points it at
 verbatim, with `{ntasks}` substituted. `""` invokes the binary with no launcher at
 all. See [`operations.md`](operations.md#vasplauncher-and-running-outside-an-allocation).
 
+**`potcar_config`** — default `null`. The POTCAR configuration file
+`pyiron_workflow_vasp` reads (see
+[the POTCAR library](installation.md#the-potcar-library)). `null` leaves the
+library's own lookup — `$PYIRON_VASP_CONFIG`, then `~/.pyiron_vasp_config` —
+in place. A path pins it: the rendered job script exports
+`PYIRON_VASP_CONFIG` and the in-job runner sets it before the library is
+imported, so the campaign stops depending on the submitting shell or on a home
+directory. `run` warns if the file does not exist on the login node (it must
+exist on the compute nodes). Participates in the staleness guard, as the rest
+of `vasp` does.
+
 ## The staleness guard: which sections participate
 
 `run` writes the fully resolved config to `<root>/assystant_config.yaml` and, on
@@ -519,6 +560,9 @@ Within `system`, `stoich_min` / `stoich_max` are compared through the
 composition sets they produce, reported as `system.compositions.<system>`: a
 unary campaign recorded with the pre-0.1.2 default `stoich_max: 12` is not
 stale, because its compositions are the same; a binary whose `max_atoms` grew is.
+A key that a recorded config predates (`vasp.potcar_config`, `magmom.moments`,
+`incar_static`) counts as its empty default, so upgrading `assystant` never by
+itself makes a campaign stale.
 
 The exemption is deliberate. Wall time, task count and partition change how the
 work reaches the scheduler, not what is computed — and since the only way past

@@ -1,5 +1,9 @@
 # Installation
 
+Setting up on a cluster for the first time — POTCAR library, VASP binary,
+modules, SLURM, a per-machine site file — is walked through step by step in
+[`new-machine.md`](new-machine.md).
+
 ## The short version
 
 ```bash
@@ -128,8 +132,10 @@ configuration file in `$PYIRON_VASP_CONFIG` or `~/.pyiron_vasp_config`
 
 `assystant` never names a POTCAR. `pyiron_workflow_vasp` resolves them from a
 configuration file, read from `$PYIRON_VASP_CONFIG` if set and otherwise from
-`~/.pyiron_vasp_config`. Without it, every VASP job in the campaign fails at
-input-writing time.
+`~/.pyiron_vasp_config` — or, better, from the path given as
+`vasp.potcar_config` in the campaign or site YAML, which the job script exports
+so the jobs do not depend on your shell or home directory. Without it, every
+VASP job in the campaign fails at input-writing time.
 
 The file is `key = value` lines, `#` for comments:
 
@@ -201,6 +207,6 @@ python -m pip install "assystant[test]"
 pytest tests/ -q          # from a checkout, or any copy of its tests/ directory
 ```
 
-124 tests, none of which touch SLURM or VASP. For an end-to-end check that does
+158 tests, none of which touch SLURM or VASP. For an end-to-end check that does
 run real DFT — without a scheduler, on a login node, in a couple of minutes — see
 the smoke test in [`operations.md`](operations.md#smoke-testing-without-a-scheduler).

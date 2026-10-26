@@ -1,0 +1,34 @@
+# Site file: everything about ONE machine -- scheduler, VASP, POTCARs -- kept apart from the physics; pass it with --site.
+#
+#   assystant example site -o site_mycluster.yaml       # fill in the EDIT lines once per machine
+#   assystant gen  camp.yaml --site site_mycluster.yaml
+#   assystant run  camp.yaml --site site_mycluster.yaml --dry-run --limit 1
+#   assystant run  camp.yaml --site site_mycluster.yaml
+#
+# The site file is merged over the campaign YAML key by key (nested mappings
+# merge, scalars and lists are replaced), so it carries only the machine-specific
+# sections and the campaign YAML can be submitted unchanged from several
+# clusters. ${VAR} and a leading ~ are expanded in `root`, `slurm` and `vasp`;
+# an unset variable is an error. A real `run` refuses to submit while any
+# "<EDIT ...>" placeholder is left. See docs/new-machine.md.
+
+# Where campaigns live on this machine (optional; the campaign YAML's `root`
+# otherwise applies, and an unset root is the current directory).
+# root: /scratch/${USER}/assyst
+
+slurm:
+  partition: "<EDIT: your SLURM partition>"
+  # account: "<EDIT: project / allocation, if your site requires --account>"
+  # env: the prefix of the environment `assystant` is installed in, AS SEEN
+  #      FROM THE COMPUTE NODES. Unset -> the interpreter running `assystant`
+  #      now, which is right whenever login and compute nodes share it.
+  # env: ~/mambaforge/envs/assystant
+  # extra_directives: ["--constraint=rome"]   # any further #SBATCH lines, verbatim
+
+vasp:
+  binary: "<EDIT: absolute path to vasp_std on the compute nodes>"
+  modules: []              # EDIT: what makes that binary's libraries resolvable, e.g. [intel/2024.0, impi/2021.11, mkl/2024.0]
+  potcar_config: "<EDIT: absolute path to your pyiron_vasp_config file>"
+  # launcher: null         # null -> srun -c 1 -n {ntasks} --hint=nomultithread; "mpirun -n {ntasks}" on a non-SLURM MPI
+  custodian: true          # production campaigns run VASP through custodian ...
+  # custodian_python: ~/mambaforge/envs/pymatgen/bin/python   # ... which needs an interpreter with `custodian` importable

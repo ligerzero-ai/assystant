@@ -118,3 +118,26 @@ def test_static_incar_overrides_win_and_null_inherits():
 def test_static_incar_can_switch_spin_polarisation_for_the_labels():
     incar = _static({"ENCUT": 400, "ISPIN": 1, "IBRION": 2}, {"ISPIN": 2})
     assert incar["MAGMOM"] == [3.0, 3.0, -1.0, 3.0]
+
+
+# -- per-element moments -------------------------------------------------------
+def test_moments_mapping_wins_over_the_host_solute_rule():
+    got = get_incar_magmom_string(
+        _fe_c_fe(), host_ele="Fe", host_magmom=3.0, solute_magmom=-1.0, moments={"C": 0.0}
+    )
+    assert got == "2*3.0 1*0.0 1*3.0"
+    # an element not in the mapping still follows the rule
+    got = get_incar_magmom_string(
+        _fe_c_fe(), host_ele="Fe", host_magmom=3.0, solute_magmom=-1.0, moments={"Mn": -2.0}
+    )
+    assert got == "2*3.0 1*-1.0 1*3.0"
+
+
+def test_build_incar_uses_magmom_moments():
+    cfg = MagmomConfig(
+        host=None, host_moment=3.0, solute_moment=-1.0, moments={"C": 0.0, "Fe": 2.5}
+    )
+    incar = build_incar({"ENCUT": 400, "ISPIN": 2}, _fe_c_fe(), cfg, "tag", host="Fe")
+    assert incar["MAGMOM"] == [2.5, 2.5, 0.0, 2.5]
+    assert cfg.moment_for("Ni", host="Fe") == -1.0
+    assert cfg.moment_for("Fe", host="Fe") == 2.5
