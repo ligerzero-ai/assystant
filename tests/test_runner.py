@@ -18,8 +18,18 @@ def _signature():
     return inspect.signature(assyst_workflow.run_ASSYST_on_structure)
 
 
+def _supported():
+    return "static_incar" in _signature().parameters
+
+
 def _kwargs(cfg, tmp_path):
-    return assyst_kwargs(cfg, bcc_fe(), tmp_path / "struct_00000_deadbeef", "Fe")
+    return assyst_kwargs(
+        cfg,
+        bcc_fe(),
+        tmp_path / "struct_00000_deadbeef",
+        "Fe",
+        static_incar_supported=_supported(),
+    )
 
 
 def test_every_kwarg_is_a_real_parameter(cfg, tmp_path):
@@ -27,6 +37,34 @@ def test_every_kwarg_is_a_real_parameter(cfg, tmp_path):
     parameters = _signature().parameters
     unknown = sorted(set(_kwargs(cfg, tmp_path)) - set(parameters))
     assert unknown == [], f"not parameters of run_ASSYST_on_structure: {unknown}"
+
+
+def test_supports_static_incar_matches_the_installed_signature():
+    from assystant.runner import supports_static_incar
+
+    assert supports_static_incar() == _supported()
+
+
+def test_static_incar_is_passed_when_supported(cfg, tmp_path):
+    changed = cfg.resolve({"incar_static.ENCUT": 520})
+    kwargs = assyst_kwargs(changed, bcc_fe(), tmp_path / "d", "Fe", static_incar_supported=True)
+    static = kwargs["static_incar"]
+    assert static["ENCUT"] == 520 and static["KSPACING"] == 0.25 and static["NSW"] == 0
+    assert "ISIF" not in static and static["MAGMOM"] == [3.0, 3.0]
+    assert kwargs["incar"]["ENCUT"] == 400 and kwargs["incar"]["ISIF"] == 7  # relaxation untouched
+
+
+def test_static_incar_is_omitted_on_an_old_graph_when_left_default(cfg, tmp_path):
+    kwargs = assyst_kwargs(cfg, bcc_fe(), tmp_path / "d", "Fe", static_incar_supported=False)
+    assert "static_incar" not in kwargs  # the old graph derives the identical INCAR itself
+
+
+def test_customised_static_incar_refuses_an_old_graph(cfg, tmp_path):
+    from assystant.config import ConfigError
+
+    changed = cfg.resolve({"incar_static.ENCUT": 520})
+    with pytest.raises(ConfigError, match="static_incar"):
+        assyst_kwargs(changed, bcc_fe(), tmp_path / "d", "Fe", static_incar_supported=False)
 
 
 def test_every_required_parameter_is_supplied(cfg, tmp_path):
@@ -59,8 +97,13 @@ def test_paths_are_absolute_and_job_specific(cfg, tmp_path):
 
 def test_config_values_reach_the_graph(cfg, tmp_path):
     changed = cfg.resolve(
-        {"assyst.ionic_steps": 37, "assyst.n_rattle": 3, "assyst.n_stretch": 4,
-         "assyst.core_overlap_tolerance": 0.25, "filters.min_dist_backend": "mic"}
+        {
+            "assyst.ionic_steps": 37,
+            "assyst.n_rattle": 3,
+            "assyst.n_stretch": 4,
+            "assyst.core_overlap_tolerance": 0.25,
+            "filters.min_dist_backend": "mic",
+        }
     )
     kwargs = assyst_kwargs(changed, bcc_fe(), tmp_path / "d", "Fe")
     assert kwargs["ionic_steps"] == 37

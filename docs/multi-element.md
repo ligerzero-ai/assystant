@@ -55,8 +55,9 @@ Al_Cu: 15 structures -> /scratch/demo/AlCu_campaign/Al_Cu
 ```
 
 One tally line per system. The unaries scan 36 spacegroups × 4 cell sizes = 144
-pairs; the binary scans 36 × 6 compositions = 216 (the six come from
-`stoich_min: 1`, `stoich_max: 3`, `max_atoms: 4` — see below). Rejection rates
+pairs; the binary scans 36 × 6 compositions = 216 — the six are every Al:Cu
+split of 2, 3 and 4 atoms, the full composition range for `max_atoms: 4` (see
+below). Rejection rates
 are higher for the binary, and that is normal: a fixed Al:Cu ratio fits far fewer
 Wyckoff-position combinations than "n atoms of one kind". With `seed` set, the
 Al system is byte-identical to the one `Al_tutorial` produces — same hashes,
@@ -123,28 +124,42 @@ invocation, so queue listings and `assystant.out` files are self-identifying:
 ## Stoichiometry: `stoich_min` / `stoich_max`
 
 For a **unary** system the composition *is* the cell size, so `gen` scans
-`min_atoms .. max_atoms` atoms per cell and ignores `stoich_min` / `stoich_max`
-entirely. For a **multi-component** system each species independently takes
-every count in `stoich_min .. stoich_max`, and the Cartesian product is filtered
-to `min_atoms <= total <= max_atoms`. The tutorial's binary:
+`min_atoms .. max_atoms` atoms per cell and `stoich_min` / `stoich_max` are
+ignored. For a **multi-component** system each species independently takes
+every count in `stoich_min .. stoich_max`, and the combinations are filtered to
+`min_atoms <= total <= max_atoms`.
+
+**By default the whole composition range is scanned.** Both bounds are `null`,
+which resolves to `stoich_min = 1` and `stoich_max = max_atoms`: for every cell
+size `n` in the atom-count window, every split with each species present. A
+binary therefore covers `n = 2 .. max_atoms` with `1 .. n-1` atoms of each
+species; a ternary every three-way split from `n = 3` up. Nothing needs to be
+set for that — the tutorial template sets neither bound:
 
 ```python
 >>> from assystant.generate import enumerate_compositions
->>> enumerate_compositions(["Al", "Cu"], min_atoms=1, max_atoms=4, stoich_min=1, stoich_max=3)
+>>> enumerate_compositions(["Al", "Cu"], min_atoms=1, max_atoms=4)
 [(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (3, 1)]
+>>> len(enumerate_compositions(["Fe", "C"], min_atoms=1, max_atoms=20))
+190
 ```
 
-Pure-Al and pure-Cu cells are *not* in that list — `stoich_min: 1` means every
-species is present in every cell. If you want the end members in the dataset,
-add them as their own unary systems, as the template does. That is also the
-reason to prefer `[[Fe], [Fe, C]]` over just `[Fe, C]` for a potential that
-must describe pure iron.
+Pure-Al and pure-Cu cells are *not* in that list — every species is present in
+every cell of a multi-component system. If you want the end members in the
+dataset, add them as their own unary systems, as the template does. That is
+also the reason to prefer `[[Fe], [Fe, C]]` over just `[Fe, C]` for a potential
+that must describe pure iron.
 
-With the defaults (`min_atoms: 1`, `max_atoms: 12`, `stoich_min: 1`,
-`stoich_max: 12`) the scan grows quickly with the number of species. Attempts
-below are compositions × 230 spacegroups; structures produced is typically a
-small fraction of that, and every produced structure is one SLURM job of
-`1 + n_rattle + 2 × n_stretch` statics after its three relaxations:
+Set a bound explicitly only to **narrow** the scan, and know that it applies to
+every species alike: `stoich_max: 3` caps iron *and* carbon at three atoms. (In
+0.1.1 and earlier the defaults were the fixed `1` / `12`, so a binary with
+`max_atoms: 20` silently stopped at `Fe12C8` and never saw `Fe19C1`; see the
+changelog for how the staleness guard treats that on upgrade.)
+
+The scan grows quickly with the number of species. Attempts below are
+compositions × 230 spacegroups at `min_atoms: 1`, `max_atoms: 12`; structures
+produced is a fraction of that, and every produced structure is one SLURM job
+of `1 + n_rattle + 2 × n_stretch` statics after its three relaxations:
 
 | system | compositions | (spacegroup, composition) attempts |
 |---|---:|---:|
@@ -152,7 +167,7 @@ small fraction of that, and every produced structure is one SLURM job of
 | `[Fe, C]` | 66 | 15,180 |
 | `[Fe, B, C]` | 220 | 50,600 |
 
-Tighten `stoich_max`, `max_atoms`, or both, for anything beyond a binary.
+Lower `max_atoms` (or set `stoich_max`) for anything beyond a binary.
 `enumerate_compositions` is the cheap way to see what a setting buys before
 running `gen`.
 
@@ -332,9 +347,7 @@ config for one element. The multi-element version of it changes only the
 system:
   species: [[Fe], [Fe, C], [Fe, N]]   # pure Fe plus two interstitial binaries
   min_atoms: 1
-  max_atoms: 12
-  stoich_min: 1                       # binaries only; Fe scans 1..12 atoms regardless
-  stoich_max: 12
+  max_atoms: 12                       # stoich_min/stoich_max left null: full composition range
   spacegroups: [1, 230]
   strain_min: 0.8
   strain_max: 1.2

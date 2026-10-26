@@ -32,9 +32,8 @@ root: ./AlCu_campaign
 system:
   species: [[Al], [Cu], [Al, Cu]]
   min_atoms: 1
-  max_atoms: 4
-  stoich_min: 1            # per-species atom counts for MULTI-component systems
-  stoich_max: 3            # only; the unaries ignore both (see docs/configuration.md)
+  max_atoms: 4             # the binary scans every Al:Cu split of 2, 3 and 4 atoms;
+                           # set stoich_min/stoich_max only to narrow that
   spacegroups: [195, 230]  # cubic only, to keep the scan small
   strain_min: 0.9
   strain_max: 1.1
@@ -50,12 +49,24 @@ incar:
   ISPIN: 1                 # non-magnetic, so `magmom` is never consulted here;
                            # a magnetic multi-element campaign needs `magmom.host`
                            # considered -- see docs/multi-element.md
-  KSPACING: 0.5            # relaxation stages only; the statics force 0.25
+  KSPACING: 0.5            # relaxation only; the labels use incar_static.KSPACING
   LREAL: false
   NELM: 60
   NSW: 50                  # never used -- assyst.ionic_steps overrides it
   PREC: Normal
   SIGMA: 0.2
+
+# The INCAR of the accurate statics -- the calculations that produce the
+# training labels -- is `incar` with these applied on top, then NSW=0 and no
+# ISIF. Everything not listed (ENCUT, PREC, ISMEAR, ...) is inherited from
+# `incar`. These four are the defaults, spelled out so you can see them; set a
+# tag to null to inherit the relaxation value instead. Needs
+# pyiron_workflow_assyst >= 0.2.2 in the job environment when customised.
+incar_static:
+  KSPACING: 0.25
+  EDIFF: 1.0e-5
+  EDIFFG: 1.0e-4
+  LREAL: false
 
 assyst:
   ionic_steps: 20

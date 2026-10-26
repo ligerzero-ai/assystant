@@ -19,6 +19,36 @@ All notable changes to this project are documented here. The format follows
 - `AlCu_tutorial` bundled template (`assystant example AlCu_tutorial`): the Al
   tutorial over `species: [[Al], [Cu], [Al, Cu]]` — two unaries and a binary —
   with the same portability guarantees as `Al_tutorial`.
+- `incar_static`: a config section for the INCAR of the accurate statics that
+  produce the training labels, layered on `incar` (`KSPACING 0.25`,
+  `EDIFF 1e-5`, `EDIFFG 1e-4`, `LREAL false` by default, exactly what every
+  campaign ran before; `null` drops a default and inherits the relaxation
+  value). `ISIF` and a non-zero `NSW` are refused. The relaxation INCAR and the
+  label INCAR are now independently adjustable; `--set incar_static.ENCUT=520`
+  works like any other override. Participates in the staleness guard through
+  its effective tags, so campaigns recorded before the section existed are not
+  stale. Passing it to the graph needs `pyiron_workflow_assyst >= 0.2.2`
+  (`static_incar`); on an older release an empty `incar_static` runs
+  identically and a customised one is refused in-job with a clear error, and
+  `run` warns when the login environment is too old.
+
+### Changed
+
+- `system.stoich_min` / `system.stoich_max` now default to `null`, meaning the
+  full composition range: `1` and `max_atoms` respectively, so a binary scans
+  every `1..n-1` split of every cell size `n` and a ternary every three-way
+  split from `n = 3`, whatever `max_atoms` is. Previously the defaults were the
+  fixed `1` / `12`, which silently truncated any multi-component scan with
+  `max_atoms > 12`. Unary systems are unaffected. The recorded
+  `assystant_config.yaml` carries the effective bounds.
+- The staleness guard compares `system.stoich_*` through the composition sets
+  they imply (reported as `system.compositions.<system>`) instead of the raw
+  numbers, so a campaign recorded by 0.1.1 with its written-out `stoich_max: 12`
+  is not stale after upgrading unless its scan actually changed.
+- `enumerate_compositions` lives in `assystant.config` (still re-exported from
+  `assystant.generate`) and enumerates with pruning rather than filtering the
+  full Cartesian product; the order is unchanged, so seeded generation is
+  byte-identical.
 
 ## [0.1.1] - 2026-10-22
 

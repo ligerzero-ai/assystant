@@ -16,8 +16,8 @@ system:
   species: [Fe]
   min_atoms: 1
   max_atoms: 12
-  stoich_min: 1          # ignored for a unary system (see README)
-  stoich_max: 12
+  # stoich_min / stoich_max: unset -> the full composition range of a
+  # multi-component system (1 .. max_atoms per species); ignored for a unary
   spacegroups: [1, 230]
   strain_min: 0.8
   strain_max: 1.2
@@ -50,6 +50,18 @@ incar:
   NSW: 500
   PREC: Accurate
   SIGMA: 0.2
+
+# The accurate statics (training labels) run on `incar` + these overrides, with
+# NSW=0 and no ISIF. Unset -> the defaults below, what every campaign has used.
+# Uncomment and edit to make the labels production-grade independently of the
+# relaxation, e.g. a higher ENCUT or a denser mesh for the labels only
+# (needs pyiron_workflow_assyst >= 0.2.2 in slurm.env):
+# incar_static:
+#   KSPACING: 0.25
+#   EDIFF: 1.0e-5
+#   EDIFFG: 1.0e-4
+#   LREAL: false
+#   ENCUT: 520
 
 magmom:
   host: null             # null -> the system's first species (Fe here)

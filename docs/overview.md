@@ -29,8 +29,11 @@ chemical system, is:
 3. **Run high-accuracy statics on the relaxed images.** The relaxation itself is
    run cheaply — coarse k-point sampling, loose convergence — because its only
    job is to produce a sensible geometry. The numbers that go into the training
-   set come from a separate static calculation on that geometry at a denser mesh
-   (`KSPACING = 0.25`) and tighter convergence (`EDIFF = 1e-5`, `LREAL = False`).
+   set come from a separate static calculation on that geometry, by default at a
+   denser mesh (`KSPACING = 0.25`) and tighter convergence (`EDIFF = 1e-5`,
+   `LREAL = False`). The two INCARs are set separately — `incar` for the
+   relaxation, `incar_static` for the labels — see
+   [`configuration.md`](configuration.md#incar_static--the-incar-of-the-training-labels).
 
 4. **And on deformed permutations of those images.** This is the step that
    supplies the off-equilibrium data. Each relaxed image is rattled (atoms

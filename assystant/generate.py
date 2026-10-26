@@ -28,12 +28,16 @@ import os
 import re
 import secrets
 from concurrent.futures import ProcessPoolExecutor
-from itertools import product
 from pathlib import Path
 
 import pandas as pd
 
-from .config import CampaignConfig, resolve_eq_volume_map, system_name
+from .config import (  # noqa: F401 -- enumerate_compositions is re-exported
+    CampaignConfig,
+    enumerate_compositions,
+    resolve_eq_volume_map,
+    system_name,
+)
 
 __all__ = [
     "MANIFEST_NAME",
@@ -81,31 +85,6 @@ def limit_blas_threads() -> None:
 
 
 # -- composition enumeration ---------------------------------------------
-def enumerate_compositions(
-    species,
-    min_atoms: int,
-    max_atoms: int,
-    stoich_min: int = 1,
-    stoich_max: int = 12,
-) -> list[tuple[int, ...]]:
-    """Composition tuples to scan for ``species``.
-
-    Unary systems enumerate cell sizes directly, ``[(n,) for n in
-    range(min_atoms, max_atoms + 1)]`` -- ``stoich_min``/``stoich_max`` do not
-    apply, because for one species the stoichiometry *is* the atom count.
-    Multi-component systems take the Cartesian product of per-species counts
-    over ``[stoich_min, stoich_max]`` and keep only those with
-    ``min_atoms <= sum(comp) <= max_atoms``.
-    """
-    k = len(species)
-    if k == 0:
-        return []
-    if k == 1:
-        return [(n,) for n in range(min_atoms, max_atoms + 1)]
-    raw = product(range(stoich_min, stoich_max + 1), repeat=k)
-    return [comp for comp in raw if min_atoms <= sum(comp) <= max_atoms]
-
-
 # -- volume rescaling -----------------------------------------------------
 def adjust_volume_per_atom(structure, min_volume: float, max_volume: float):
     """Rescale ``structure`` into the [min, max] volume-per-atom band.
@@ -189,7 +168,10 @@ def _gen_one(
 
         xtal = pyxtal()
         xtal.from_random(
-            dim=3, group=sg, species=list(species), numIons=list(comp),
+            dim=3,
+            group=sg,
+            species=list(species),
+            numIons=list(comp),
             random_state=rng_seed,
         )
         pmg = xtal.to_pymatgen()
@@ -234,8 +216,8 @@ def generate_structures(
     eq_volume_map: dict,
     strain_min: float = 0.8,
     strain_max: float = 1.2,
-    stoich_min: int = 1,
-    stoich_max: int = 12,
+    stoich_min=None,
+    stoich_max=None,
     min_atoms: int = 1,
     max_atoms: int = 12,
     sg_min: int = 1,
@@ -266,22 +248,29 @@ def generate_structures(
                 else:
                     # Deterministic but decorrelated per task.
                     task_seed = int(
-                        hashlib.sha256(
-                            f"{seed}|{sg}|{comp}|{counter}".encode()
-                        ).hexdigest()[:8],
+                        hashlib.sha256(f"{seed}|{sg}|{comp}|{counter}".encode()).hexdigest()[:8],
                         16,
                     )
                 counter += 1
-                yield (sg, species, comp, eq_volume_map, strain_min, strain_max,
-                       task_seed, perturb)
+                yield (
+                    sg,
+                    species,
+                    comp,
+                    eq_volume_map,
+                    strain_min,
+                    strain_max,
+                    task_seed,
+                    perturb,
+                )
 
     records = []
     failures: dict[str, int] = {}
     with ProcessPoolExecutor(max_workers=n_jobs, initializer=limit_blas_threads) as pool:
         iterable = pool.map(_gen_one_star, task_iter(), chunksize=chunksize or 1)
         if progress:
-            iterable = _tqdm(iterable, total=total_tasks,
-                             desc=f"PyXtal scan {system_name(species)}")
+            iterable = _tqdm(
+                iterable, total=total_tasks, desc=f"PyXtal scan {system_name(species)}"
+            )
         for record in iterable:
             if record is None:
                 failures["None"] = failures.get("None", 0) + 1
@@ -337,8 +326,16 @@ def write_system(root, species, records) -> pd.DataFrame:
     manifest = pd.DataFrame(
         rows,
         columns=[
-            "index", "system", "dirname", "hash", "spacegroup", "composition",
-            "formula", "n_atoms", "volume_per_atom", "poscar",
+            "index",
+            "system",
+            "dirname",
+            "hash",
+            "spacegroup",
+            "composition",
+            "formula",
+            "n_atoms",
+            "volume_per_atom",
+            "poscar",
         ],
     )
     manifest.to_csv(sys_dir / MANIFEST_NAME, index=False)

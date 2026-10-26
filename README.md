@@ -115,6 +115,12 @@ another. See
    campaigns applied it to ISIF7 only. New ISIF5/ISIF2 data is not directly
    comparable with old datasets — see
    [behaviour changes](docs/behaviour-changes.md).
+4. **The relaxation and the labels have separate INCARs.** `incar` is the
+   relaxation; the accurate statics that produce the training data run on
+   `incar` plus [`incar_static`](docs/configuration.md#incar_static--the-incar-of-the-training-labels)
+   (by default `KSPACING 0.25`, `EDIFF 1e-5`, `EDIFFG 1e-4`, `LREAL false`), so
+   a production-grade `ENCUT` or k-mesh for the labels costs nothing in the
+   relaxation.
 
 ## Tests
 

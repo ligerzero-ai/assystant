@@ -68,3 +68,53 @@ def test_build_incar_omits_magmom_when_not_spin_polarised():
 def test_host_defaults_to_the_first_species():
     assert MagmomConfig(host=None).host_for(["Ni", "C"]) == "Ni"
     assert MagmomConfig(host="Fe").host_for(["Ni", "C"]) == "Fe"
+
+
+# -- the statics INCAR (training labels) -------------------------------------
+def _static(base, overrides, **kw):
+    from assystant.incar import build_static_incar
+
+    return build_static_incar(
+        base,
+        overrides,
+        _fe_c_fe(),
+        MagmomConfig(host_moment=3.0, solute_moment=-1.0),
+        "tag",
+        host="Fe",
+        **kw,
+    )
+
+
+def test_static_incar_defaults_match_the_historical_overrides():
+    base = {
+        "ENCUT": 400,
+        "ISPIN": 2,
+        "KSPACING": 0.5,
+        "EDIFF": 1e-4,
+        "ISIF": 7,
+        "NSW": 500,
+        "IBRION": 2,
+    }
+    incar = _static(base, {})
+    assert incar["KSPACING"] == 0.25 and incar["EDIFF"] == 1e-5 and incar["EDIFFG"] == 1e-4
+    assert incar["LREAL"] is False
+    assert incar["NSW"] == 0 and "ISIF" not in incar
+    assert incar["ENCUT"] == 400 and incar["IBRION"] == 2  # inherited from the relaxation INCAR
+    assert incar["SYSTEM"] == "tag" and incar["MAGMOM"] == [3.0, 3.0, -1.0, 3.0]
+
+
+def test_static_incar_overrides_win_and_null_inherits():
+    base = {"ENCUT": 400, "ISPIN": 1, "KSPACING": 0.5, "ALGO": "Fast", "IBRION": 2}
+    incar = _static(base, {"ENCUT": 520, "kspacing": None, "ALGO": "Normal", "NELM": 200})
+    assert incar["ENCUT"] == 520  # label calculations at higher cutoff than the relaxation
+    assert (
+        incar["KSPACING"] == 0.5
+    )  # null -> the 0.25 default is dropped, relaxation value inherited
+    assert incar["ALGO"] == "Normal" and incar["NELM"] == 200
+    assert incar["EDIFF"] == 1e-5  # untouched defaults still apply
+    assert "MAGMOM" not in incar
+
+
+def test_static_incar_can_switch_spin_polarisation_for_the_labels():
+    incar = _static({"ENCUT": 400, "ISPIN": 1, "IBRION": 2}, {"ISPIN": 2})
+    assert incar["MAGMOM"] == [3.0, 3.0, -1.0, 3.0]

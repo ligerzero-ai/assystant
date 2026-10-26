@@ -230,6 +230,33 @@ error: unknown element symbol in `system.species`: 'Xx'
 ```
 
 ```
+error: `incar_static.ISIF` is not allowed: the accurate statics never relax
+anything, and run_ASSYST_on_structure strips ISIF from their INCAR. ISIF belongs
+in `incar`, where it seeds the ISIF7 stage.
+```
+
+```
+error: `incar_static.NSW` is 10, but the accurate statics always run with NSW = 0
+(run_ASSYST_on_structure forces it). Remove it; the relaxation step count is
+`assyst.ionic_steps`.
+```
+
+A customised `incar_static` on a job environment whose `pyiron_workflow_assyst`
+predates 0.2.2 fails inside the job, in `<run_dir>/assystant.err`, rather than
+silently running the statics with the built-in defaults:
+
+```
+assystant.config.ConfigError: `incar_static` is set, but the installed
+pyiron_workflow_assyst's run_ASSYST_on_structure takes no `static_incar`
+parameter and would run the statics with its built-in defaults instead. Install
+pyiron_workflow_assyst >= 0.2.2 in the job environment (slurm.env), or remove
+`incar_static`.
+```
+
+`run` prints a warning to the same effect beforehand when the *login*
+environment is too old; the job environment is what counts.
+
+```
 error: `filters.min_dist` must be 1.0 (got 1.2): run_ASSYST_on_structure in
 pyiron_workflow_assyst 0.2.0 hardcodes the 1.0 Angstrom floor it passes to
 get_ASSYST_deformed_structures and exposes no parameter for it, so any other
@@ -257,9 +284,11 @@ pre-2026 code caught every exception identically, which made "your composition
 range is infeasible" and "your install is broken" look the same.
 
 If everything is `Comp_CompatibilityError` and you got nothing, your scan is
-genuinely infeasible — widen `spacegroups`, or check `min_atoms`/`max_atoms`
-against `stoich_min`/`stoich_max` for a multi-component system, where the
-intersection can easily be empty.
+genuinely infeasible — widen `spacegroups`, or, for a multi-component system
+with explicit `stoich_min`/`stoich_max`, check them against
+`min_atoms`/`max_atoms`: `stoich_min: 3` with `max_atoms: 4` leaves a binary
+no composition at all. Left `null`, the bounds follow `max_atoms` and the scan
+is the full composition range.
 
 ---
 

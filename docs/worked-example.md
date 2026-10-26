@@ -35,7 +35,7 @@ incar:
   ISIF: 7
   ISMEAR: 1
   ISPIN: 1
-  KSPACING: 0.5               # relaxation stages only; statics force 0.25
+  KSPACING: 0.5               # relaxation only; statics default to 0.25 (incar_static)
   LREAL: false
   NELM: 60
   NSW: 50                     # never used -- ionic_steps overrides it
