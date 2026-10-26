@@ -23,12 +23,17 @@ slurm:
   #      FROM THE COMPUTE NODES. Unset -> the interpreter running `assystant`
   #      now, which is right whenever login and compute nodes share it.
   # env: ~/mambaforge/envs/assystant
-  # extra_directives: ["--constraint=rome"]   # any further #SBATCH lines, verbatim
+  # extra_directives: ["--constraint=rome"]   # any further #SBATCH lines, verbatim; GPUs: ["--gres=gpu:4"]
+  # prologue: ["source /etc/profile.d/modules.sh", "export OMP_NUM_THREADS=1"]   # shell lines run once per job
+  # module_purge: true     # false on a machine without environment modules
+  # submit_command: sbatch # e.g. "sbatch --export=ALL", or "flux batch -N1 -n64 -t 48h" (script path is appended)
 
 vasp:
   binary: "<EDIT: absolute path to vasp_std on the compute nodes>"
   modules: []              # EDIT: what makes that binary's libraries resolvable, e.g. [intel/2024.0, impi/2021.11, mkl/2024.0]
   potcar_config: "<EDIT: absolute path to your pyiron_vasp_config file>"
-  # launcher: null         # null -> srun -c 1 -n {ntasks} --hint=nomultithread; "mpirun -n {ntasks}" on a non-SLURM MPI
+  # launcher: null         # null -> srun -c 1 -n {ntasks} --hint=nomultithread; "mpirun -n {ntasks}" on a non-SLURM MPI,
+  #                        # "srun -n {ntasks} --gpus-per-task=1" for GPU VASP, "flux run -n {ntasks}" under flux
+  # prologue: ["export OMP_PLACES=cores"]   # shell lines run in every VASP directory, after the module loads
   custodian: true          # production campaigns run VASP through custodian ...
   # custodian_python: ~/mambaforge/envs/pymatgen/bin/python   # ... which needs an interpreter with `custodian` importable

@@ -162,8 +162,11 @@ srun -c 1 -n <slurm.ntasks> --hint=nomultithread
 ```
 
 Any other string replaces it verbatim, with `{ntasks}` substituted if present.
-`""` invokes the binary with no launcher at all. The rendered command, at the
-defaults, is:
+`""` invokes the binary with no launcher at all. (`vasp.prologue` adds shell
+lines before it, `slurm.prologue` / `slurm.extra_directives` shape the job
+around it, and `slurm.submit_command` replaces `sbatch` — GPU, OpenMPI and
+flux recipes are in [`new-machine.md`](new-machine.md#4-adapting-it-gpus-other-mpis-flux).)
+The rendered command, at the defaults, is:
 
 ```
 module load intel/2024.0

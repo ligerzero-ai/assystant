@@ -469,6 +469,9 @@ slurm:
   env: null
   account: null
   extra_directives: []
+  prologue: []
+  module_purge: true
+  submit_command: sbatch
 ```
 
 One job per structure, each a single `ntasks`-task allocation that runs the whole
@@ -488,7 +491,17 @@ names whatever interpreter `assystant` was run with.
 
 **`account`** — default `null`; emitted as `#SBATCH --account=` when set.
 **`extra_directives`** — default `[]`; a list of verbatim `#SBATCH` argument
-strings, e.g. `["--reservation=benchmarking"]`.
+strings, e.g. `["--reservation=benchmarking"]` or `["--gres=gpu:4"]`.
+
+**`prologue`** — default `[]`; verbatim shell lines placed after `module purge`
+and before the runner starts, run once per job: `source` a site profile,
+`export OMP_NUM_THREADS=...`. (Lines the *VASP process* needs go in
+`vasp.prologue`.) **`module_purge`** — default `true`; set `false` on a machine
+without an environment-modules system. **`submit_command`** — default
+`sbatch`; the command a rendered script is handed to, split like a shell
+would, with the script path appended — `sbatch --export=ALL`, a site wrapper,
+or another batch system's command. How these compose into the script is shown
+line by line in [`new-machine.md`](new-machine.md#3-how-the-job-file-is-built).
 
 **This whole section is exempt from the staleness guard** — see below.
 
@@ -503,6 +516,7 @@ vasp:
   max_errors: 10
   launcher: null
   potcar_config: null
+  prologue: []
 ```
 
 **`binary`** — default `vasp_std`; required to be non-empty. Write an absolute
@@ -535,6 +549,13 @@ the runner environment: the example config points it at
 `srun -c 1 -n <slurm.ntasks> --hint=nomultithread`. Any other string replaces it
 verbatim, with `{ntasks}` substituted. `""` invokes the binary with no launcher at
 all. See [`operations.md`](operations.md#vasplauncher-and-running-outside-an-allocation).
+
+**`prologue`** — default `[]`; verbatim shell lines run in every VASP
+calculation directory after the `module load` lines and before the launcher:
+`export OMP_PLACES=cores`, `export CUDA_VISIBLE_DEVICES=...`, `source` a
+toolkit environment. With `modules` and `launcher` this is the whole VASP
+invocation — see [`new-machine.md`](new-machine.md#4-adapting-it-gpus-other-mpis-flux)
+for GPU, OpenMPI and flux recipes.
 
 **`potcar_config`** — default `null`. The POTCAR configuration file
 `pyiron_workflow_vasp` reads (see
