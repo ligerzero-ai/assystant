@@ -29,6 +29,18 @@ All notable changes to this project are documented here. The format follows
 - The staleness guard treats a key the recorded config predates
   (`vasp.potcar_config`, `magmom.moments`, `incar_static`) as its empty
   default, so upgrading never by itself makes a campaign stale.
+- Job-script and VASP-invocation hooks for machines that are not the
+  reference cluster: `slurm.prologue` (shell lines run once per job, after
+  `module purge`), `slurm.module_purge` (`false` without environment modules),
+  `slurm.submit_command` (what a rendered script is handed to; `sbatch`
+  default, the path appended), and `vasp.prologue` (shell lines run in every
+  VASP directory after the `module load`s, before the launcher). The
+  new-machine guide shows the rendered script and VASP block line by line
+  with the key that produced each, plus GPU, OpenMPI and flux recipes, and
+  spells out how `pyiron_workflow_vasp` resolves the POTCAR library
+  (`<pyiron_vasp_resources>/potpaw_<NN>/<GGA|LDA>/<variant>/POTCAR`, the
+  per-element default-variant table, and that `vasp_POTCAR_path_*` values are
+  not read).
 
 - `docs/multi-element.md`: a guide to campaigns over several elements — the
   two shapes of `system.species` (several systems vs. one multi-component

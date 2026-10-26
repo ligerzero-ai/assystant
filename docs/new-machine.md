@@ -28,95 +28,321 @@ from. Details and the per-manager commands are in
 
 ## 2. The POTCAR library
 
-`assystant` never names a POTCAR; `pyiron_workflow_vasp` resolves one per
-element from a small `key = value` file:
+`assystant` never names a POTCAR. Each VASP calculation gets its POTCAR from
+`pyiron_workflow_vasp`, and knowing exactly how that lookup works is what
+makes a new machine's library configurable in five minutes instead of an
+afternoon of `PotcarNotGeneratedError`.
+
+### How `pyiron_workflow_vasp` resolves a POTCAR
+
+1. It reads **one config file**: `$PYIRON_VASP_CONFIG` if that variable is
+   set, else `~/.pyiron_vasp_config`. (`vasp.potcar_config` in the site file
+   sets the variable for you — below.) The file is `key = value` lines; `#`
+   starts a comment. It is read once, at import, and cached.
+2. From it, it takes three keys:
+   * `pyiron_vasp_resources` — a directory;
+   * `default_POTCAR_set` — a name like `potpaw64`, `potpaw54`, `potpaw52`;
+   * `default_functional` — `GGA` or `LDA` (`GGA` means the PBE `potpaw_PBE`
+     potentials).
+3. It builds the library directory as
+   **`<pyiron_vasp_resources>/<set with an underscore before the digits>`**:
+   `potpaw64` → `<pyiron_vasp_resources>/potpaw_64`. A key
+   `vasp_POTCAR_path_potpaw64 = ...` must exist for the set to be recognised,
+   but **its value is ignored** — the path always comes from
+   `pyiron_vasp_resources` plus the set name. (This is confirmed below, not
+   assumed.)
+4. For every element in the structure it looks up the **default variant** in a
+   table shipped with the package (`vasp_pseudopotential_GGA_data.csv`): `Fe`
+   → `Fe`, but `Ti` → `Ti_sv`, `Mn` → `Mn_pv`, `Cr` → `Cr_pv`, `V` → `V_sv`,
+   `Nb`/`Mo`/`W` → `_sv`, `Ce` → `Ce_3`, `Nd` → `Nd_3`. These are VASP's own
+   recommended potentials. The alternative tables `GGA_MPRelaxSet` and
+   `GGA_MatPES` (Materials Project choices: `Fe_pv`, `Ni_pv`, `Ti_pv`, …) are
+   selected with a fourth key, `default_pseudopotential_set`.
+5. The file it reads is
+   **`<library>/<functional>/<variant>/POTCAR`**, e.g.
+   `/sw/potcars/potpaw_64/GGA/Ti_sv/POTCAR`. Nothing else: no `.gz`, no
+   `POTCAR.Z`, no flat `<library>/Ti_sv`.
+
+So the directory layout has one level — the functional — that VASP's own
+tarballs do not have. The distributed archives unpack to
+`potpaw_PBE.64/Fe/POTCAR` and `potpaw_LDA.64/Fe/POTCAR`; the lookup wants
+`potpaw_64/GGA/Fe/POTCAR` and `potpaw_64/LDA/Fe/POTCAR`. Two symlinks bridge
+that.
+
+### Worked example
+
+Say VASP is installed at `/sw/vasp/6.4.3/bin/vasp_std` and the POTCAR
+archives were unpacked under `/sw/potcars`:
+
+```
+/sw/potcars/potpaw_PBE.64/Fe/POTCAR      (and every other element directory)
+/sw/potcars/potpaw_LDA.64/Fe/POTCAR
+```
+
+Create the layout the lookup expects, without copying anything:
+
+```bash
+mkdir -p /sw/potcars/potpaw_64
+ln -s ../potpaw_PBE.64 /sw/potcars/potpaw_64/GGA
+ln -s ../potpaw_LDA.64 /sw/potcars/potpaw_64/LDA
+```
+
+and write the config file next to it:
 
 ```ini
 # /sw/potcars/pyiron_vasp_config
-default_POTCAR_set = potpaw64
-default_functional = GGA
-vasp_POTCAR_path_potpaw64 = /sw/potcars/potpaw_64
-vasp_POTCAR_path_potpaw54 = /sw/potcars/potpaw_54
+pyiron_vasp_resources = /sw/potcars
+default_POTCAR_set = potpaw64          # -> /sw/potcars/potpaw_64
+default_functional = GGA               # -> /sw/potcars/potpaw_64/GGA/<variant>/POTCAR
+vasp_POTCAR_path_potpaw64 = unused     # the key must exist; the value is not read
+# default_pseudopotential_set = GGA_MPRelaxSet   # optional: Materials Project variants instead
 ```
 
-`default_POTCAR_set` must match the suffix of one `vasp_POTCAR_path_<suffix>`
-key; each such directory holds `GGA/` and `LDA/`, each with one directory per
-POTCAR variant (`Fe/`, `Ti_sv/`, `Cr_pv/`, …) containing a `POTCAR`.
+Then point the site file at both:
 
-Write the file once per cluster and name it in the site file:
+```yaml
+vasp:
+  binary: /sw/vasp/6.4.3/bin/vasp_std
+  potcar_config: /sw/potcars/pyiron_vasp_config
+```
+
+Executed against exactly this layout (built from placeholder files; paths
+shortened):
+
+```
+$ find sw -maxdepth 3 | sort
+  sw
+  sw/potpaw_64
+  sw/potpaw_64/GGA          -> ../potpaw_PBE.64
+  sw/potpaw_64/LDA          -> ../potpaw_LDA.64
+  sw/potpaw_LDA.64
+  sw/potpaw_LDA.64/Fe
+  sw/potpaw_LDA.64/Fe/POTCAR
+  sw/potpaw_PBE.64
+  sw/potpaw_PBE.64/Al
+  sw/potpaw_PBE.64/Al/POTCAR
+  sw/potpaw_PBE.64/C
+  sw/potpaw_PBE.64/C/POTCAR
+  sw/potpaw_PBE.64/Fe
+  sw/potpaw_PBE.64/Fe/POTCAR
+  sw/potpaw_PBE.64/Mn_pv
+  sw/potpaw_PBE.64/Mn_pv/POTCAR
+  sw/potpaw_PBE.64/Ti_sv
+  sw/potpaw_PBE.64/Ti_sv/POTCAR
+  sw/pyiron_vasp_config
+
+$ PYIRON_VASP_CONFIG=/scratch/demo/sw/pyiron_vasp_config python -c "
+from ase import Atoms
+from pyiron_workflow_vasp.vasp import (_default_POTCAR_library_path, _default_functional,
+                                       get_default_POTCAR_paths, _get_potcar_config)
+print('resolved config:', {k: v for k, v in _get_potcar_config().items() if k != 'pyiron_vasp_resources'})
+lib, func = _default_POTCAR_library_path(), _default_functional()
+import os
+for el in ('Fe', 'Ti', 'Mn', 'C', 'Al'):
+    p = get_default_POTCAR_paths(Atoms(el), lib, func)[0]
+    print(f'{el:3s} -> {p}   exists={os.path.exists(p)}')
+"
+resolved config: {'default_POTCAR_set': 'potpaw64', 'default_functional': 'GGA', 'vasp_POTCAR_path_potpaw64': '/scratch/demo/sw/potpaw_64', 'default_POTCAR_path': '/scratch/demo/sw/potpaw_64', 'pseudopotential_csv_suffix': 'GGA'}
+Fe  -> /scratch/demo/sw/potpaw_64/GGA/Fe/POTCAR   exists=True
+Ti  -> /scratch/demo/sw/potpaw_64/GGA/Ti_sv/POTCAR   exists=True
+Mn  -> /scratch/demo/sw/potpaw_64/GGA/Mn_pv/POTCAR   exists=True
+C   -> /scratch/demo/sw/potpaw_64/GGA/C/POTCAR   exists=True
+Al  -> /scratch/demo/sw/potpaw_64/GGA/Al/POTCAR   exists=True
+```
+
+Note `vasp_POTCAR_path_potpaw64` in the resolved config: the file said
+`IGNORED-see-below`, the library says `/scratch/demo/sw/potpaw_64`. That is
+step 3 above. Two more things the same script shows when the config is
+changed:
+
+```
+# default_POTCAR_set = potpaw_64   (underscore in the set name)
+ValueError: Unknown or missing default_POTCAR_set: potpaw_64. Valid options: ['potpaw64']
+
+# default_pseudopotential_set = GGA_MPRelaxSet
+Fe -> Fe_pv    Ti -> Ti_pv    Mn -> Mn_pv    Ni -> Ni_pv
+```
+
+Run that check with **every element of every system in the campaign** in the
+tuple, and look at `exists=`. A `False` there is the only cheap warning you
+get: a missing POTCAR otherwise fails inside the allocation, after queueing,
+in `<run_dir>/assystant.err`. The variant choice also feeds the core-overlap
+filter — see
+[`behaviour-changes.md`](behaviour-changes.md#rcore-is-read-from-the-potcar-actually-used).
+
+### What `vasp.potcar_config` does with it
 
 ```yaml
 vasp:
   potcar_config: /sw/potcars/pyiron_vasp_config
 ```
 
-That pins it: the rendered job script exports `PYIRON_VASP_CONFIG` and the
-in-job runner sets the same variable before the library is imported, so the
-campaign no longer depends on `~/.pyiron_vasp_config` or on what the shell you
-submitted from had exported. (Leave it `null` and the library falls back to
-`$PYIRON_VASP_CONFIG`, then `~/.pyiron_vasp_config` — fine on a machine you
-alone use, fragile everywhere else.)
+The rendered job script gets `export PYIRON_VASP_CONFIG=/sw/potcars/pyiron_vasp_config`,
+and the in-job runner sets the same variable before `pyiron_workflow_vasp` is
+imported (it has to be *before*: the library reads the variable into a module
+constant at import time). The campaign therefore no longer depends on
+`~/.pyiron_vasp_config` or on what the shell you submitted from had exported.
+Leave it `null` and the library's own lookup applies — fine on a machine you
+alone use, fragile everywhere else.
 
-**Check it resolves for every element in the campaign** before submitting
-anything. A missing POTCAR fails only inside the allocation, after queueing:
+## 3. How the job file is built
+
+`assystant run` renders **one sbatch script per structure** and hands it to
+`sbatch`. Knowing what goes where lets you adapt it to a GPU partition, a
+different MPI, or a different launcher without guessing. Here is a script
+rendered from a GPU site file (shown in the next section), with every line
+annotated by the config key that produced it:
 
 ```bash
-PYIRON_VASP_CONFIG=/sw/potcars/pyiron_vasp_config python -c "
-from ase import Atoms
-from pyiron_workflow_vasp.vasp import (
-    _default_POTCAR_library_path, _default_functional, get_default_POTCAR_paths)
-lib, func = _default_POTCAR_library_path(), _default_functional()
-print(lib, func)
-for el in ('Fe', 'Mn', 'C'):                      # every element of every system
-    print(el, get_default_POTCAR_paths(Atoms(el), lib, func))
-"
+#!/bin/bash
+#SBATCH --job-name=assyst_Al_00000                       # assyst_<system>_<index>
+#SBATCH --partition=gpu                                  # slurm.partition
+#SBATCH --ntasks=4                                       # slurm.ntasks
+#SBATCH --cpus-per-task=16                               # slurm.cpus_per_task
+#SBATCH --time=01:00:00                                  # slurm.time
+#SBATCH --chdir=/scratch/demo/gpu_campaign/Al/struct_00000_36c5d68a   # the structure's run_dir (fixed)
+#SBATCH --output=/scratch/demo/gpu_campaign/Al/struct_00000_36c5d68a/assystant.out
+#SBATCH --error=/scratch/demo/gpu_campaign/Al/struct_00000_36c5d68a/assystant.err
+#SBATCH --get-user-env                                   # fixed
+#SBATCH --mem-per-cpu=8000MB                             # slurm.mem_per_cpu
+#SBATCH --hint=nomultithread                             # fixed
+#SBATCH --account=proj1234                               # slurm.account (only when set)
+#SBATCH --gres=gpu:a100:4                                # slurm.extra_directives, verbatim
+#SBATCH --constraint=a100                                #   "
+
+module purge                                             # unless slurm.module_purge: false
+
+source /etc/profile.d/modules.sh                         # slurm.prologue, verbatim
+export OMP_NUM_THREADS=16                                #   "
+
+# The POTCAR library pyiron_workflow_vasp reads, pinned by vasp.potcar_config
+# so the job does not depend on the submitting shell or ~/.pyiron_vasp_config.
+export PYIRON_VASP_CONFIG=/scratch/demo/sw/pyiron_vasp_config    # vasp.potcar_config
+
+# Run the ASSYST graph for exactly this structure. run_dir is absolute;
+# executorlib's cache lives at <run_dir>/executorlib_cache so it is
+# scoped to one structure and cannot be shared between two.
+/scratch/demo/env/bin/python -m assystant.runner \       # slurm.env/bin/python, or the interpreter running assystant
+    --config /scratch/demo/gpu_campaign/assystant_config.yaml \
+    --poscar /scratch/demo/gpu_campaign/Al/structures/00000_structure.vasp \
+    --run-dir /scratch/demo/gpu_campaign/Al/struct_00000_36c5d68a \
+    --system Al
 ```
 
-Note the default selection prefers semicore variants (`Ti` → `Ti_sv`), and
-that choice feeds the core-overlap filter — see
-[`behaviour-changes.md`](behaviour-changes.md#rcore-is-read-from-the-potcar-actually-used).
+(The runner line is one line in the real file.) `--chdir` is load-bearing,
+not cosmetic: `run` skips a structure whose directory shows up in
+`squeue -u $USER -o %Z`, which is how re-running `run` resumes instead of
+double-submitting.
 
-## 3. VASP: binary, modules, launcher, custodian
+**That script does not run VASP.** It runs the Python runner, which executes
+the ASSYST graph for the structure: three relaxations, then the statics. For
+each of those calculations the graph creates a directory
+(`ISIF7/`, `ISIF5/`, `ISIF2/`, `ISIF2_accur_relaxstep0/`, …), writes
+INCAR/POSCAR/POTCAR/KPOINTS into it, and runs **the VASP command block** in it
+through a shell. That block is the second thing you adapt, and it is built
+from `vasp`:
 
-```yaml
-vasp:
-  binary: /sw/vasp/6.4.3/bin/vasp_std        # as the COMPUTE NODES see it
-  modules: [intel/2024.0, impi/2021.11, mkl/2024.0]   # what makes its libraries resolvable; [] if none
-  launcher: null                             # null -> srun -c 1 -n {ntasks} --hint=nomultithread
-  custodian: true
-  custodian_python: /sw/envs/pymatgen/bin/python     # an interpreter with `custodian` importable
+```bash
+module load nvhpc/24.5                                   # vasp.modules, one line each
+module load openmpi/4.1.6-cuda
+module load fftw/3.3.10
+export OMP_PLACES=cores                                  # vasp.prologue, verbatim
+export OMP_PROC_BIND=close
+cat > custodian_vasp.py << 'PYEOF'                       # only with vasp.custodian: true
+import sys
+from custodian.custodian import Custodian
+from custodian.vasp.handlers import (
+    VaspErrorHandler,
+    NonConvergingErrorHandler,
+    FrozenJobErrorHandler,
+)
+from custodian.vasp.jobs import VaspJob
+
+output_filename = "vasp.log"
+handlers = [
+    VaspErrorHandler(output_filename=output_filename),
+    NonConvergingErrorHandler(),
+    FrozenJobErrorHandler(output_filename=output_filename),
+]
+jobs = [VaspJob(sys.argv[1:], output_file=output_filename, suffix="")]
+Custodian(handlers, jobs, max_errors=10, polling_time_step=3, monitor_freq=1).run()   # vasp.max_errors
+PYEOF
+
+/sw/envs/pymatgen/bin/python custodian_vasp.py srun -n 4 --gpus-per-task=1 --cpu-bind=cores /sw/vasp/6.4.3-nvhpc/bin/vasp_std >> vasp.log
+#  ^ vasp.custodian_python          ^ vasp.launcher ({ntasks} = slurm.ntasks)      ^ vasp.binary
 ```
 
-* **`binary`** must be an absolute path. `${VAR}` and `~` are expanded (see
-  [section 5](#5-one-site-file-per-machine)).
-* **`modules`** are emitted as `module load` lines after a `module purge`.
-* **`launcher`** replaces `srun` where needed: `"mpirun -n {ntasks}"` on a
-  cluster whose MPI is not SLURM-integrated, `""` to invoke the binary bare, or
-  `"env I_MPI_FABRICS=shm"` for a login-node smoke test — see
-  [`operations.md`](operations.md#vasplauncher-and-running-outside-an-allocation).
-* **`custodian`** drives VASP through error handlers that a campaign of random
-  cells needs. `custodian_python` is frequently *not* the runner environment
-  (the runner does not need custodian; the custodian env does not need
-  `pyiron_workflow`); `null` falls back to `slurm.env`. Neither is validated at
-  submit time.
+With `custodian: false` the last part collapses to
+`<launcher> <binary> >> vasp.log`. Everything VASP prints lands in `vasp.log`
+in that calculation directory, which is also what custodian's handlers watch.
 
-## 4. SLURM
+So the whole invocation is the composition of five keys, in this order:
+**`vasp.modules` → `vasp.prologue` → (custodian wrapper) →
+`vasp.launcher` `vasp.binary`**, run with the working directory set to the
+calculation directory, inside the allocation that `slurm.*` requested. You
+can print it for any config without rendering a campaign:
+
+```bash
+python -c "
+from assystant.config import CampaignConfig
+from assystant.submit import build_vasp_command
+print(build_vasp_command(CampaignConfig.from_yaml('camp.yaml', ['site_gpu.yaml']).resolve()))"
+```
+
+## 4. Adapting it: GPUs, other MPIs, flux
+
+The site file that produced the script above:
 
 ```yaml
 slurm:
-  partition: compute
-  account: proj1234            # only if your site requires --account
-  ntasks: 64
-  cpus_per_task: 1
-  time: "48:00:00"
-  mem_per_cpu: 2000MB
-  env: ~/mambaforge/envs/assystant      # prefix with assystant, as seen from compute nodes; null -> this interpreter
-  extra_directives: ["--constraint=rome"]   # verbatim extra #SBATCH lines
+  partition: gpu
+  account: proj1234
+  ntasks: 4                       # one MPI rank per GPU
+  cpus_per_task: 16
+  mem_per_cpu: 8000MB
+  extra_directives: ["--gres=gpu:a100:4", "--constraint=a100"]
+  prologue:
+    - source /etc/profile.d/modules.sh
+    - export OMP_NUM_THREADS=16
+vasp:
+  binary: /sw/vasp/6.4.3-nvhpc/bin/vasp_std
+  modules: [nvhpc/24.5, openmpi/4.1.6-cuda, fftw/3.3.10]
+  prologue:
+    - export OMP_PLACES=cores
+    - export OMP_PROC_BIND=close
+  launcher: "srun -n {ntasks} --gpus-per-task=1 --cpu-bind=cores"
+  potcar_config: /scratch/demo/sw/pyiron_vasp_config
+  custodian: true
+  custodian_python: /sw/envs/pymatgen/bin/python
 ```
 
-`slurm` is the one section the [staleness guard](operations.md#the-staleness-guard)
-ignores, so changing partition, wall time or task count never forces
-`--from-scratch`.
+The pattern for any machine: resources and anything the *job* needs go in
+`slurm` (`extra_directives` for `#SBATCH` lines, `prologue` for shell lines
+run once per job); anything the *VASP process* needs goes in `vasp`
+(`modules`, `prologue`, `launcher`). Recipes:
+
+| situation | what to set |
+|---|---|
+| **GPU VASP** (`vasp_std` built with NVHPC / OpenACC) | `slurm.extra_directives: ["--gres=gpu:4"]`, `slurm.ntasks` = number of GPUs, `cpus_per_task` for the OpenMP threads, `vasp.launcher: "srun -n {ntasks} --gpus-per-task=1"`, `vasp.prologue` for `OMP_*` / `CUDA_VISIBLE_DEVICES`, and the CUDA-aware MPI in `vasp.modules` |
+| **OpenMPI / MPICH without SLURM integration** | `vasp.launcher: "mpirun -n {ntasks} --bind-to core"` (or `mpiexec`); keep `slurm.ntasks` so `{ntasks}` is right |
+| **Intel MPI** | the default `srun` launcher works when the `impi` module wires PMI2 (the MPIE setup); outside an allocation see the [smoke test](#7-smoke-test-on-the-login-node) |
+| **flux as the launcher inside a SLURM job** | `vasp.launcher: "flux run -n {ntasks} -g 1"`, `vasp.prologue: [source /opt/flux/env.sh]` |
+| **flux (or PBS, LSF) as the scheduler** | `slurm.submit_command: "flux batch -N1 -n4 -g4 -t 48h"` (the script path is appended; flux ignores `#SBATCH` lines, so give resources on the command line), `slurm.module_purge` as appropriate, and `vasp.launcher: "flux run -n {ntasks}"`. The already-finished skip still works; the *queued* skip queries `squeue` and prints a warning when it is absent, so do not re-run `run` while jobs are waiting |
+| **no environment-modules system** | `slurm.module_purge: false`, `vasp.modules: []`, and `source` whatever sets up the toolchain in `vasp.prologue` |
+| **VASP needs a license / scratch variable** | `vasp.prologue: ["export VASP_SCRATCH=/tmp", ...]` |
+| **custodian lives elsewhere** | `vasp.custodian_python: /path/to/env/bin/python`; the runner env does not need custodian, the custodian env does not need `pyiron_workflow` |
+| **sbatch needs flags** | `slurm.submit_command: "sbatch --export=ALL --parsable"` |
+
+The flux-launcher, no-modules, no-custodian variant renders the VASP block as:
+
+```bash
+source /opt/nvhpc/env.sh
+flux run -n 4 -g 1 /sw/vasp/6.4.3-nvhpc/bin/vasp_std >> vasp.log
+```
+
+Whatever you change, the two checks are the same: `run --dry-run --limit 1`
+and read the script, then the `build_vasp_command` one-liner above for the
+VASP block. Neither needs the scheduler.
 
 ## 5. One site file per machine
 
@@ -309,9 +535,9 @@ commands do not.
 ## Checklist
 
 * [ ] `pip install assystant` in an environment the compute nodes can run
-* [ ] `pyiron_vasp_config` written; the resolution snippet prints a POTCAR for every element
+* [ ] `<pyiron_vasp_resources>/potpaw_64/{GGA,LDA}` layout in place; `pyiron_vasp_config` written; the resolution snippet prints `exists=True` for every element
 * [ ] `assystant example site -o site_<cluster>.yaml`; no `<EDIT` left: `partition`, `binary`, `modules`, `potcar_config`, `custodian_python` if `custodian: true`
-* [ ] `run --dry-run --limit 1`; read the script: partition, binary, modules, `export PYIRON_VASP_CONFIG`
+* [ ] `run --dry-run --limit 1`; read the script, and print the VASP block with `build_vasp_command`: partition, directives, modules, launcher, binary, `export PYIRON_VASP_CONFIG`
 * [ ] smoke test finishes on the login node
 * [ ] `run --limit 1`; the job produces `df_ASSYST_jobs.pkl`
 * [ ] then everything else

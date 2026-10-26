@@ -23,7 +23,7 @@ class Recorder:
     def __init__(self):
         self.calls = []
 
-    def __call__(self, script_path):
+    def __call__(self, script_path, *args):
         self.calls.append(str(script_path))
 
 
@@ -495,3 +495,67 @@ def test_missing_potcar_config_file_warns_but_renders(generated_campaign, capsys
         "Warning: vasp.potcar_config /nowhere/pyiron_vasp_config does not exist"
         in capsys.readouterr().err
     )
+
+
+# -- prologues, module purge, submit command ------------------------------
+def test_prologues_land_in_job_script_and_vasp_command(cfg, tmp_path):
+    changed = cfg.resolve(
+        {
+            "slurm.prologue": ["source /etc/profile.d/site.sh", "export OMP_NUM_THREADS=1"],
+            "slurm.extra_directives": ["--gres=gpu:4"],
+            "vasp.prologue": ["export CUDA_VISIBLE_DEVICES=0,1,2,3"],
+            "vasp.launcher": "srun -n 4 --gpus-per-task=1",
+            "vasp.custodian": False,
+        }
+    )
+    script = render_sbatch(
+        changed,
+        run_dir=tmp_path / "d",
+        poscar=tmp_path / "p.vasp",
+        system="Fe",
+        job_name="j",
+        config_path=tmp_path / "c.yaml",
+    )
+    assert "#SBATCH --gres=gpu:4" in script
+    purge, src, exp, run = (
+        script.index(s)
+        for s in (
+            "module purge",
+            "source /etc/profile.d/site.sh",
+            "export OMP_NUM_THREADS=1",
+            "assystant.runner",
+        )
+    )
+    assert purge < src < exp < run
+    command = build_vasp_command(changed)
+    lines = command.splitlines()
+    assert lines.index("module load intel/2024.0") < lines.index(
+        "export CUDA_VISIBLE_DEVICES=0,1,2,3"
+    )
+    assert lines[-1] == "srun -n 4 --gpus-per-task=1 /opt/vasp/bin/vasp_std >> vasp.log"
+
+
+def test_module_purge_can_be_disabled(cfg, tmp_path):
+    script = render_sbatch(
+        cfg.resolve({"slurm.module_purge": False}),
+        run_dir=tmp_path / "d",
+        poscar=tmp_path / "p.vasp",
+        system="Fe",
+        job_name="j",
+        config_path=tmp_path / "c.yaml",
+    )
+    assert "module purge" not in script
+    assert "#!/bin/bash" in script and "assystant.runner" in script
+
+
+def test_submit_command_is_used_with_the_script_appended(generated_campaign, monkeypatch):
+    import subprocess
+
+    cfg, manifest = generated_campaign
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda argv, check: calls.append(argv))
+    changed = cfg.resolve({"slurm.submit_command": "sbatch --export=ALL --parsable"})
+    stats = submit_campaign(changed, queued_dirs=set())
+    assert stats["submitted"] == len(manifest) == 2
+    assert all(argv[:3] == ["sbatch", "--export=ALL", "--parsable"] for argv in calls)
+    assert all(argv[3].endswith(JOB_SCRIPT_NAME) for argv in calls)

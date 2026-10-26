@@ -79,6 +79,7 @@ def build_vasp_command(cfg: CampaignConfig, ntasks: int | None = None) -> str:
     """
     ntasks = int(cfg.slurm.ntasks if ntasks is None else ntasks)
     lines = [f"module load {module}" for module in (cfg.vasp.modules or [])]
+    lines.extend(str(line) for line in (cfg.vasp.prologue or []))
     if cfg.vasp.launcher is None:
         launcher = f"srun -c 1 -n {ntasks} --hint=nomultithread"
     else:
@@ -148,13 +149,17 @@ def render_sbatch(
             f"export PYIRON_VASP_CONFIG={cfg.vasp.potcar_config}",
             "",
         ]
+    setup = []
+    if cfg.slurm.module_purge:
+        setup += ["module purge", ""]
+    if cfg.slurm.prologue:
+        setup += [str(line) for line in cfg.slurm.prologue] + [""]
     body = "\n".join(
         [
             "#!/bin/bash",
             *directives,
             "",
-            "module purge",
-            "",
+            *setup,
             *environment,
             "# Run the ASSYST graph for exactly this structure. run_dir is absolute;",
             "# executorlib's cache lives at <run_dir>/executorlib_cache so it is",
@@ -237,8 +242,10 @@ def _refuse_placeholders(cfg: CampaignConfig) -> None:
         )
 
 
-def _sbatch(script_path: Path) -> None:
-    subprocess.run(["sbatch", str(script_path)], check=True)
+def _sbatch(script_path: Path, command: str = "sbatch") -> None:
+    import shlex
+
+    subprocess.run([*shlex.split(command), str(script_path)], check=True)
 
 
 def submit_campaign(
@@ -279,7 +286,10 @@ def submit_campaign(
     config_path = guard_config(cfg, from_scratch=from_scratch, write=True)
     if queued_dirs is None:
         queued_dirs = set() if dry_run else squeue_workdirs()
-    submit_fn = submit_fn or _sbatch
+    if submit_fn is None:
+
+        def submit_fn(script_path, _command=cfg.slurm.submit_command):
+            return _sbatch(script_path, _command)
 
     stats = {
         "submitted": 0,

@@ -354,6 +354,19 @@ class SlurmConfig:
     account: Any = None
     #: Verbatim extra ``#SBATCH`` lines, e.g. ["--reservation=benchmarking"].
     extra_directives: list = field(default_factory=list)
+    #: Verbatim shell lines placed in the job script after ``module purge`` and
+    #: before the runner starts: ``source`` a site profile, ``export`` thread
+    #: counts, pick GPUs.  They run once per job, in the job's shell; the VASP
+    #: invocation itself has its own hook, ``vasp.prologue``.
+    prologue: list = field(default_factory=list)
+    #: Emit ``module purge`` at the top of the job script.  ``false`` on a
+    #: machine without an environment-modules system, where the line would
+    #: only print ``module: command not found``.
+    module_purge: bool = True
+    #: Command that submits a rendered job script; the script path is appended.
+    #: ``sbatch`` by default.  A wrapper, or ``sbatch`` with extra flags, or a
+    #: different batch system's submit command for the same script.
+    submit_command: str = "sbatch"
 
     def python_executable(self) -> str:
         if self.env:
@@ -385,6 +398,12 @@ class VaspConfig:
     #: in-job runner sets it before the library is imported, so the campaign
     #: no longer depends on the submitting shell's environment or home directory.
     potcar_config: Any = None
+    #: Verbatim shell lines run in every VASP calculation directory after the
+    #: ``module load`` lines and before VASP is launched: ``export
+    #: OMP_NUM_THREADS=1``, ``export CUDA_VISIBLE_DEVICES=...``, ``source`` an
+    #: MPI or GPU toolkit environment.  Together with ``launcher`` this is
+    #: what adapts the invocation to a GPU node, OpenMPI, flux, or no MPI.
+    prologue: list = field(default_factory=list)
 
 
 @dataclass
