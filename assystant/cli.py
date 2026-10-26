@@ -37,17 +37,30 @@ def _add_override_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--partition", help="Override `slurm.partition`")
     parser.add_argument("--env", help="Override `slurm.env` (conda prefix for the runner)")
     parser.add_argument("--vasp-binary", dest="vasp_binary", help="Override `vasp.binary`")
-    parser.add_argument("--ionic-steps", dest="ionic_steps", type=int,
-                        help="Override `assyst.ionic_steps`")
+    parser.add_argument(
+        "--ionic-steps",
+        dest="ionic_steps",
+        type=int,
+        help="Override `assyst.ionic_steps`",
+    )
     parser.add_argument("--n-rattle", dest="n_rattle", type=int, help="Override `assyst.n_rattle`")
-    parser.add_argument("--n-stretch", dest="n_stretch", type=int,
-                        help="Override `assyst.n_stretch`")
-    parser.add_argument("--min-dist-backend", dest="min_dist_backend",
-                        choices=["neighbor_list", "mic"], help="Override `filters.min_dist_backend`")
+    parser.add_argument(
+        "--n-stretch", dest="n_stretch", type=int, help="Override `assyst.n_stretch`"
+    )
+    parser.add_argument(
+        "--min-dist-backend",
+        dest="min_dist_backend",
+        choices=["neighbor_list", "mic"],
+        help="Override `filters.min_dist_backend`",
+    )
     parser.add_argument("--seed", type=int, help="Override `system.seed`")
     parser.add_argument("--n-jobs", dest="n_jobs", type=int, help="Override `system.n_jobs`")
     parser.add_argument(
-        "--set", dest="set_", action="append", default=[], metavar="PATH=VALUE",
+        "--set",
+        dest="set_",
+        action="append",
+        default=[],
+        metavar="PATH=VALUE",
         help="Override any config scalar by dotted path, e.g. --set assyst.rattle_strain=0.02",
     )
 
@@ -94,10 +107,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     example.add_argument("name", nargs="?", help="Template name, e.g. Al_tutorial")
-    example.add_argument("-o", "--output", metavar="FILE",
-                         help="Write the template to FILE instead of stdout")
-    example.add_argument("--force", action="store_true",
-                         help="Overwrite FILE if it already exists")
+    example.add_argument(
+        "-o",
+        "--output",
+        metavar="FILE",
+        help="Write the template to FILE instead of stdout",
+    )
+    example.add_argument("--force", action="store_true", help="Overwrite FILE if it already exists")
 
     gen = sub.add_parser("gen", help="PyXtal spacegroup x stoichiometry scan -> POSCARs + manifest")
     gen.add_argument("config", help="Campaign YAML")
@@ -107,34 +123,55 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="Render and submit one SLURM job per structure")
     run.add_argument("config", help="Campaign YAML")
     run.add_argument("--limit", type=int, help="Process at most N structures")
-    run.add_argument("--dry-run", action="store_true",
-                     help="Render sbatch scripts without submitting or querying the scheduler")
     run.add_argument(
-        "--from-scratch", action="store_true",
+        "--dry-run",
+        action="store_true",
+        help="Render sbatch scripts without submitting or querying the scheduler",
+    )
+    run.add_argument(
+        "--from-scratch",
+        action="store_true",
         help="Accept a changed config and DELETE each structure's run_dir in full, "
-             "including executorlib_cache",
+        "including executorlib_cache",
     )
     _add_override_flags(run)
 
     status = sub.add_parser("status", help="Per-system progress table")
     status.add_argument("config", help="Campaign YAML")
     status.add_argument("--csv", help="Append the table to a job_progress-shaped CSV")
-    status.add_argument("--watch", nargs="?", type=int, const=60, default=None,
-                        metavar="SECONDS", help="Refresh every SECONDS (default 60)")
+    status.add_argument(
+        "--watch",
+        nargs="?",
+        type=int,
+        const=60,
+        default=None,
+        metavar="SECONDS",
+        help="Refresh every SECONDS (default 60)",
+    )
     _add_override_flags(status)
 
-    collect = sub.add_parser("collect", help="Concatenate every df_ASSYST_jobs.pkl into one dataset")
+    collect = sub.add_parser(
+        "collect", help="Concatenate every df_ASSYST_jobs.pkl into one dataset"
+    )
     collect.add_argument("config", help="Campaign YAML")
     collect.add_argument("-o", "--output", required=True, help="Output .pkl (or .csv)")
-    collect.add_argument("--all-systems", action="store_true",
-                         help="Scan every system directory under root, not only those in the config")
+    collect.add_argument(
+        "--all-systems",
+        action="store_true",
+        help="Scan every system directory under root, not only those in the config",
+    )
     _add_override_flags(collect)
 
     return parser
 
 
 def _cmd_example(args) -> int:
-    from .examples import list_templates, template_description, template_text, write_template
+    from .examples import (
+        list_templates,
+        template_description,
+        template_text,
+        write_template,
+    )
 
     if not args.name:
         names = list_templates()
@@ -169,6 +206,7 @@ def _cmd_run(args) -> int:
     from .submit import submit_campaign
 
     cfg = load_config(args)
+    _warn_if_static_incar_unsupported(cfg)
     stats = submit_campaign(
         cfg, dry_run=args.dry_run, limit=args.limit, from_scratch=args.from_scratch
     )
@@ -187,6 +225,33 @@ def _cmd_run(args) -> int:
         )
     print(message)
     return 0
+
+
+def _warn_if_static_incar_unsupported(cfg) -> None:
+    """Warn now, on the login node, about what would otherwise fail in the job.
+
+    Only a heuristic: the jobs run in ``slurm.env``, which may not be this
+    environment, so this neither blocks nor stays silent.  The in-job runner
+    enforces it for real.
+    """
+    if not cfg.incar_static:
+        return
+    try:
+        from .runner import STATIC_INCAR_MIN_VERSION, supports_static_incar
+
+        if supports_static_incar():
+            return
+        import pyiron_workflow_assyst
+
+        installed = getattr(pyiron_workflow_assyst, "__version__", "?")
+    except Exception:  # pragma: no cover - no pyiron_workflow_assyst here at all
+        return
+    print(
+        f"Warning: `incar_static` is set but pyiron_workflow_assyst {installed} in "
+        f"this environment lacks `static_incar` (needs >= {STATIC_INCAR_MIN_VERSION}); "
+        "jobs will refuse to run unless slurm.env has a newer one",
+        file=sys.stderr,
+    )
 
 
 def _cmd_status(args) -> int:

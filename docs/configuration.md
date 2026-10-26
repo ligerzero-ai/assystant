@@ -76,8 +76,8 @@ system:
   species: [Fe]
   min_atoms: 1
   max_atoms: 12
-  stoich_min: 1
-  stoich_max: 12
+  stoich_min: null
+  stoich_max: null
   spacegroups: [1, 230]
   strain_min: 0.8
   strain_max: 1.2
@@ -94,18 +94,36 @@ replaces the hand-maintained `submit_temp.sh` with one line per element; a
 forty-element unary campaign is one file. Symbols are validated against
 pymatgen's periodic table, and a repeated element within one system is rejected.
 Each system gets its own directory named by joining its symbols with underscores:
-`Fe`, `Fe_C`, `Fe_B_C`.
+`Fe`, `Fe_C`, `Fe_B_C`. [`multi-element.md`](multi-element.md) walks through a
+campaign with several systems, including what `--limit`, `status` and `collect`
+do with them and why an element is best added before the first `run`.
 
 **`min_atoms` / `max_atoms`** — default `1` / `12`. Inclusive bounds on the atom
 count per generated cell.
 
-**`stoich_min` / `stoich_max`** — default `1` / `12`. Per-species count bounds for
-multi-component systems: compositions are the Cartesian product of
-`range(stoich_min, stoich_max + 1)` over the species, filtered to those with
-`min_atoms <= sum <= max_atoms`. **They do not apply to unary systems**, where
-compositions are simply `[(n,) for n in range(min_atoms, max_atoms + 1)]` —
-for one species the stoichiometry *is* the atom count, so applying both bounds
-would only let you contradict yourself.
+**`stoich_min` / `stoich_max`** — default `null` / `null`, meaning **the full
+composition range**: `stoich_min` resolves to 1 and `stoich_max` to
+`max_atoms`. Per-species count bounds for multi-component systems: every
+species takes every count in `[stoich_min, stoich_max]`, and the combinations
+with `min_atoms <= total <= max_atoms` are scanned. With the defaults that is,
+for a cell of `n` atoms, every split with each species present — a binary
+scans `1..n-1` of each species for every `n` from 2 to `max_atoms`, a ternary
+every three-way split from `n = 3` up — whatever `max_atoms` is. Set either
+bound explicitly only to *narrow* the scan (an interstitial-poor Fe–C set with
+`stoich_max: 2` on carbon is not expressible, since the bounds apply to every
+species alike; use a smaller `max_atoms` or accept the full range).
+**They do not apply to unary systems**, where compositions are simply
+`[(n,) for n in range(min_atoms, max_atoms + 1)]` — for one species the
+stoichiometry *is* the atom count. See
+[`multi-element.md`](multi-element.md#stoichiometry-stoich_min--stoich_max)
+for how fast the scan grows.
+
+Before 0.1.2 the defaults were the fixed `1` / `12`, which silently truncated
+a multi-component scan whenever `max_atoms` exceeded 12 (Fe19C1 was never
+generated at `max_atoms: 20`). The recorded config always carries the
+effective bounds, and the staleness guard compares the composition sets they
+imply rather than the numbers, so an existing campaign does not read as stale
+after upgrading unless its scan actually changed.
 
 **`spacegroups`** — default `[1, 230]`, i.e. all of them. A `[min, max]` pair; a
 bare integer means that one group; a `{min:, max:}` mapping also works. Every
@@ -146,25 +164,24 @@ BLAS and OpenMP thread counts are pinned to 1 in every worker regardless, and
 unconditionally, so an `OMP_NUM_THREADS` inherited from your login shell cannot
 reintroduce the oversubscription that pinning exists to prevent.
 
-## `incar` — the base VASP settings
+## `incar` — the relaxation INCAR
 
 A plain mapping of INCAR tag to value; keys are upper-cased on load. There is no
-default INCAR — whatever you write here is the campaign's base, and the ASSYST
-graph derives four INCARs from it:
+default INCAR — whatever you write here is the campaign's base. It is used
+directly by the three relaxation stages, and it is the starting point for the
+statics INCAR that [`incar_static`](#incar_static--the-incar-of-the-training-labels)
+adjusts:
 
-| stage | derived from base by |
+| stage | INCAR |
 |---|---|
-| ISIF7 | `NSW = assyst.ionic_steps`, `ISIF = 7` |
-| ISIF5 | `NSW = assyst.ionic_steps`, `ISIF = 5` |
-| ISIF2 | `NSW = assyst.ionic_steps`, `ISIF = 2` |
-| statics | `NSW = 0`, `ISIF` removed, `KSPACING = 0.25`, `EDIFF = 1e-5`, `EDIFFG = 1e-4`, `LREAL = False` |
+| ISIF7 | `incar` with `NSW = assyst.ionic_steps`, `ISIF = 7` |
+| ISIF5 | `incar` with `NSW = assyst.ionic_steps`, `ISIF = 5` |
+| ISIF2 | `incar` with `NSW = assyst.ionic_steps`, `ISIF = 2` |
+| statics | `incar` with `incar_static` applied, `NSW = 0`, `ISIF` removed |
 
-Two consequences worth internalising. First, the base `NSW` you write is
-**never used** — all three relaxation stages take `assyst.ionic_steps`, and the
-statics take 0. It is kept in the example configs for provenance only. Second,
-the statics override `KSPACING` to 0.25 unconditionally, so the k-point density
-of your training data is fixed regardless of what the base INCAR says; the base
-`KSPACING` governs only the relaxation stages, where cheap sampling is the point.
+One consequence worth internalising: the `NSW` you write here is **never
+used** — all three relaxation stages take `assyst.ionic_steps`, and the statics
+take 0. It is kept in the example configs for provenance only.
 
 Two tags `assystant` manages for you:
 
@@ -184,7 +201,8 @@ explicitly.
 config-load time if missing. `IBRION: 2` is what ASSYST campaigns use; the
 reasoning is in [`operations.md`](operations.md#ibrion-is-not-optional).
 
-A production INCAR, from [`examples/Fe_unary.yaml`](../examples/Fe_unary.yaml):
+A production relaxation INCAR, from
+[`examples/Fe_unary.yaml`](../examples/Fe_unary.yaml):
 
 ```yaml
 incar:
@@ -216,6 +234,74 @@ incar:
 The aggressive mixing parameters (`AMIX`, `BMIX`, …) are there because random
 PyXtal cells are hostile to the default mixer.
 
+## `incar_static` — the INCAR of the training labels
+
+The relaxation only has to produce a sensible geometry, so it runs cheap. The
+numbers that end up in the training set come from the **accurate statics** on
+the relaxed images and their permutations, and those are a separate
+calculation with their own INCAR. `incar_static` is where you set it.
+
+```yaml
+incar_static:            # defaults, spelled out
+  KSPACING: 0.25
+  EDIFF: 1.0e-5
+  EDIFFG: 1.0e-4
+  LREAL: false
+```
+
+The statics INCAR is `incar` with `incar_static` applied on top, then
+`NSW = 0` and no `ISIF`. **Anything you do not mention is inherited from
+`incar`** — `ENCUT`, `PREC`, `ISMEAR`, `SIGMA`, `ALGO`, `NELM`, `ISPIN`, the
+mixing tags — so the two INCARs stay in step unless you say otherwise.
+
+The four defaults above are what every ASSYST campaign has used for its labels
+(denser k-mesh, tighter convergence, reciprocal-space projection), and they are
+applied whether or not the section exists. Your entries layer over them:
+
+```yaml
+incar:                   # relaxation: cheap and robust
+  ENCUT: 400
+  PREC: Accurate
+  KSPACING: 0.5
+  EDIFF: 1.0e-4
+  ALGO: Fast
+  ISMEAR: 1
+  SIGMA: 0.2
+  IBRION: 2
+  ISIF: 7
+
+incar_static:            # labels: production grade
+  ENCUT: 520             # higher cutoff for the labels only
+  KSPACING: 0.2          # denser than the 0.25 default
+  ALGO: Normal           # the relaxation's ALGO: Fast is not inherited
+  NELM: 300
+  ISMEAR: -5             # tetrahedron method is fine for a static
+                         # EDIFF 1e-5, EDIFFG 1e-4, LREAL false: defaults, still applied
+```
+
+**`null` means "inherit from `incar`"**: it drops a default rather than setting
+one. `incar_static: {KSPACING: null}` makes the statics use the relaxation's
+`KSPACING` — the one way to get the labels at the same k-mesh as the
+relaxation.
+
+Two things are not settings and are refused at config-load time: `ISIF`
+(statics never relax; it belongs in `incar`, where it seeds ISIF7) and any
+`NSW` other than 0. `SYSTEM` and `MAGMOM` are stamped exactly as for `incar`;
+an `ISPIN: 2` set only in `incar_static` gets its MAGMOM.
+
+Every key is addressable from the command line, `--set incar_static.ENCUT=520`,
+and the section participates in the staleness guard, compared through its
+effective tags: a campaign recorded before this section existed, or one that
+spells the defaults out, is not stale; a changed `KSPACING` is, reported as
+`incar_static.KSPACING`.
+
+**Needs `pyiron_workflow_assyst >= 0.2.2`** in the environment the jobs run in
+(`slurm.env`). Older releases derive the statics INCAR themselves, from exactly
+these defaults, so a config with no `incar_static` runs identically on either;
+a customised one is refused by the in-job runner on an older release rather
+than silently ignored, and `run` warns up front when the login environment is
+too old.
+
 ## `magmom` — the MAGMOM string
 
 ```yaml
@@ -234,7 +320,10 @@ collapsed into `count*moment` terms — so `Fe Fe C Fe` with the defaults become
 default is what lets a multi-system unary campaign work in one file: with
 `species: [[La], [Ce], [Pr]]` and `host: null`, each element is its own host.
 Set it explicitly only for a multi-component campaign where one specific element
-is the matrix.
+is the matrix — and even then, putting the matrix first in each inner list
+(`[[Fe, C], [Ni, C]]`) is usually simpler, since an explicit `host` applies to
+every system in the file. See
+[`multi-element.md`](multi-element.md#magnetic-systems-magmomhost).
 
 **`host_moment` / `solute_moment`** — defaults `3.0` / `-0.5`. Initial moments in
 µB for the host and for everything else. Note that
@@ -425,6 +514,11 @@ aborts with `StaleConfigError` naming the changed keys.
 
 **`slurm` is exempt. Everything else participates**: `root`, `system`, `incar`,
 `magmom`, `assyst`, `filters`, `vasp`.
+
+Within `system`, `stoich_min` / `stoich_max` are compared through the
+composition sets they produce, reported as `system.compositions.<system>`: a
+unary campaign recorded with the pre-0.1.2 default `stoich_max: 12` is not
+stale, because its compositions are the same; a binary whose `max_atoms` grew is.
 
 The exemption is deliberate. Wall time, task count and partition change how the
 work reaches the scheduler, not what is computed — and since the only way past

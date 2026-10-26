@@ -16,19 +16,48 @@ import argparse
 import sys
 from pathlib import Path
 
-from .config import CampaignConfig
-from .incar import build_incar
+from .config import CampaignConfig, ConfigError
+from .incar import build_incar, build_static_incar
 from .submit import RESULT_FILENAME, build_vasp_command
 
-__all__ = ["assyst_kwargs", "run_structure", "main"]
+__all__ = ["assyst_kwargs", "run_structure", "main", "STATIC_INCAR_MIN_VERSION"]
+
+#: First pyiron_workflow_assyst release whose ``run_ASSYST_on_structure`` takes
+#: ``static_incar``.  Older releases derive the statics INCAR themselves, from
+#: ``incar`` plus the same defaults ``incar_static`` layers over, so a config
+#: that leaves ``incar_static`` empty runs identically on either.
+STATIC_INCAR_MIN_VERSION = "0.2.2"
 
 
-def assyst_kwargs(cfg: CampaignConfig, structure, run_dir: Path, system: str) -> dict:
+def supports_static_incar() -> bool:
+    """Whether the installed ``run_ASSYST_on_structure`` accepts ``static_incar``."""
+    import inspect
+
+    from pyiron_workflow_assyst import run_ASSYST_on_structure
+
+    return "static_incar" in inspect.signature(run_ASSYST_on_structure).parameters
+
+
+def assyst_kwargs(
+    cfg: CampaignConfig,
+    structure,
+    run_dir: Path,
+    system: str,
+    *,
+    static_incar_supported: bool = True,
+) -> dict:
     """Map the campaign config onto ``run_ASSYST_on_structure``'s parameters.
 
     Split out from :func:`run_structure` so the mapping can be asserted against
     ``inspect.signature(run_ASSYST_on_structure)`` without importing a VASP
     stack or running anything.
+
+    ``static_incar`` (the INCAR of the accurate statics, from ``incar`` plus
+    ``incar_static``) is passed only when ``static_incar_supported``.  On an
+    older pyiron_workflow_assyst that is harmless as long as ``incar_static``
+    is empty -- the graph then derives the identical INCAR itself -- and a
+    :class:`ConfigError` otherwise, because the customisation would be
+    silently ignored.
 
     Note what is deliberately absent: ``files_to_be_deleted``.
     ``vasp_job`` treats ``None`` as "delete CHG/CHGCAR/WAVECAR" (the documented
@@ -39,9 +68,25 @@ def assyst_kwargs(cfg: CampaignConfig, structure, run_dir: Path, system: str) ->
     """
     run_dir = Path(run_dir).resolve()
     host = cfg.magmom.host_for(system.split("_"))
+    static_incar = build_static_incar(
+        cfg.incar, cfg.incar_static, structure, cfg.magmom, run_dir.name, host
+    )
+    if static_incar_supported:
+        static = dict(static_incar=static_incar)
+    elif cfg.incar_static:
+        raise ConfigError(
+            "`incar_static` is set, but the installed pyiron_workflow_assyst's "
+            "run_ASSYST_on_structure takes no `static_incar` parameter and would "
+            "run the statics with its built-in defaults instead. Install "
+            f"pyiron_workflow_assyst >= {STATIC_INCAR_MIN_VERSION} in the job "
+            "environment (slurm.env), or remove `incar_static`."
+        )
+    else:
+        static = {}
     return dict(
         structure=structure,
         incar=build_incar(cfg.incar, structure, cfg.magmom, run_dir.name, host),
+        **static,
         potcar_paths=None,
         job_name=str(run_dir),
         vasp_command=build_vasp_command(cfg),
@@ -79,7 +124,13 @@ def run_structure(cfg: CampaignConfig, poscar: Path, run_dir: Path, system: str)
     node = pwf.node(run_ASSYST_on_structure)
     return node.run(
         RunConfig(run_dir=run_dir),
-        **assyst_kwargs(cfg, structure, run_dir, system),
+        **assyst_kwargs(
+            cfg,
+            structure,
+            run_dir,
+            system,
+            static_incar_supported=supports_static_incar(),
+        ),
     )
 
 
@@ -90,7 +141,9 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--config", required=True, help="Recorded resolved campaign config")
     parser.add_argument("--poscar", required=True, help="POSCAR for this structure")
-    parser.add_argument("--run-dir", required=True, help="Absolute run directory for this structure")
+    parser.add_argument(
+        "--run-dir", required=True, help="Absolute run directory for this structure"
+    )
     parser.add_argument("--system", required=True, help="System name, e.g. Fe or Fe_C")
     args = parser.parse_args(argv)
 

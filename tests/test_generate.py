@@ -25,14 +25,21 @@ from conftest import bcc_fe, fcc_ni, record_for
 # -- composition enumeration ---------------------------------------------
 def test_unary_compositions_are_cell_sizes():
     assert enumerate_compositions(["Fe"], min_atoms=1, max_atoms=12) == [(n,) for n in range(1, 13)]
-    assert enumerate_compositions(["Fe"], min_atoms=3, max_atoms=5) == [(3,), (4,), (5,)]
+    assert enumerate_compositions(["Fe"], min_atoms=3, max_atoms=5) == [
+        (3,),
+        (4,),
+        (5,),
+    ]
 
 
 def test_unary_ignores_stoich_bounds():
     """For one species the stoichiometry IS the atom count, so stoich_* must not apply."""
-    assert enumerate_compositions(
-        ["Fe"], min_atoms=1, max_atoms=4, stoich_min=2, stoich_max=3
-    ) == [(1,), (2,), (3,), (4,)]
+    assert enumerate_compositions(["Fe"], min_atoms=1, max_atoms=4, stoich_min=2, stoich_max=3) == [
+        (1,),
+        (2,),
+        (3,),
+        (4,),
+    ]
 
 
 def test_binary_compositions_filtered_by_total_atom_count():
@@ -135,14 +142,21 @@ def test_blas_threads_pinned_even_when_already_set(monkeypatch):
     monkeypatch.setenv("OMP_NUM_THREADS", "8")
     monkeypatch.delenv("MKL_NUM_THREADS", raising=False)
     limit_blas_threads()
-    for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
-                "NUMEXPR_NUM_THREADS"):
+    for var in (
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    ):
         assert os.environ[var] == "1", var
 
 
 # -- manifest -------------------------------------------------------------
 def test_write_system_writes_poscars_and_manifest(cfg):
-    records = [record_for(bcc_fe(2.87), spacegroup=229), record_for(fcc_ni(), spacegroup=225)]
+    records = [
+        record_for(bcc_fe(2.87), spacegroup=229),
+        record_for(fcc_ni(), spacegroup=225),
+    ]
     manifest = write_system(cfg.root, ["Fe"], records)
 
     sys_dir = cfg.root_path / "Fe"
@@ -194,8 +208,15 @@ def test_seeded_generation_is_reproducible():
     # adjust_volume_per_atom clamps the cell to a band edge, so two unseeded runs
     # can coincide by construction and the test would pass without the seed
     # being threaded at all.
-    kwargs = dict(sg=1, species=["Fe"], comp=(4,), eq_volume_map={"Fe": 11.8},
-                  strain_min=0.8, strain_max=1.2, perturb=0.1)
+    kwargs = dict(
+        sg=1,
+        species=["Fe"],
+        comp=(4,),
+        eq_volume_map={"Fe": 11.8},
+        strain_min=0.8,
+        strain_max=1.2,
+        perturb=0.1,
+    )
     first = _gen_one(seed=12345, **kwargs)
     second = _gen_one(seed=12345, **kwargs)
     other = _gen_one(seed=999, **kwargs)
@@ -213,8 +234,14 @@ def test_generation_reports_the_reason_structures_were_rejected(capsys):
     # Spacegroup 229 (bcc) cannot accommodate a single atom, so every task fails
     # with pyxtal's Comp_CompatibilityError.
     records = generate_structures(
-        ["Fe"], {"Fe": 11.8}, min_atoms=1, max_atoms=1, sg_min=229, sg_max=229,
-        n_jobs=1, progress=False,
+        ["Fe"],
+        {"Fe": 11.8},
+        min_atoms=1,
+        max_atoms=1,
+        sg_min=229,
+        sg_max=229,
+        n_jobs=1,
+        progress=False,
     )
     assert records == []
     assert "Comp_CompatibilityError" in capsys.readouterr().out
@@ -224,11 +251,44 @@ def test_generation_produces_structures_for_a_feasible_pair():
     from assystant.generate import generate_structures
 
     records = generate_structures(
-        ["Fe"], {"Fe": 11.8}, min_atoms=2, max_atoms=2, sg_min=229, sg_max=229,
-        seed=1, n_jobs=1, progress=False,
+        ["Fe"],
+        {"Fe": 11.8},
+        min_atoms=2,
+        max_atoms=2,
+        sg_min=229,
+        sg_max=229,
+        seed=1,
+        n_jobs=1,
+        progress=False,
     )
     assert len(records) == 1
     assert records[0]["n_atoms"] == 2
     assert records[0]["spacegroup"] == 229
     # Volume rescaled into [0.8, 1.2] x 11.8.
     assert 0.8 * 11.8 <= records[0]["volume_per_atom"] <= 1.2 * 11.8
+
+
+# -- default stoichiometry = the full composition range ---------------------
+def test_default_stoich_bounds_scan_the_full_composition_range():
+    """With no stoich bounds, every composition with each species >= 1 and
+    min_atoms <= total <= max_atoms is scanned: for a binary at total n that is
+    1..n-1 of each species, whatever max_atoms is."""
+    got = enumerate_compositions(["Fe", "C"], min_atoms=1, max_atoms=20)
+    assert (19, 1) in got and (1, 19) in got
+    assert (20, 0) not in got and (0, 20) not in got
+    assert min(sum(c) for c in got) == 2  # each species present -> binary starts at 2 atoms
+    assert len(got) == sum(n - 1 for n in range(2, 21))
+    assert got == sorted(got)  # lexicographic, the order the per-task seeds are keyed on
+
+
+def test_default_ternary_starts_at_three_atoms_and_covers_every_split():
+    got = enumerate_compositions(["Fe", "B", "C"], min_atoms=1, max_atoms=6)
+    assert min(sum(c) for c in got) == 3
+    assert (4, 1, 1) in got and (1, 1, 4) in got
+    assert len(got) == len([c for c in product(range(1, 7), repeat=3) if sum(c) <= 6])
+
+
+def test_explicit_stoich_max_still_narrows_the_scan():
+    got = enumerate_compositions(["Fe", "C"], min_atoms=1, max_atoms=20, stoich_max=3)
+    assert max(max(c) for c in got) == 3
+    assert (19, 1) not in got

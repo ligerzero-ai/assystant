@@ -36,14 +36,27 @@ __all__ = [
     "SlurmConfig",
     "VaspConfig",
     "RECORDED_CONFIG_NAME",
+    "DEFAULT_INCAR_STATIC",
+    "effective_static_overrides",
     "recorded_config_path",
     "load_recorded_config",
     "calculation_key",
     "config_differences",
+    "enumerate_compositions",
+    "resolve_stoich_range",
 ]
 
 #: Name of the resolved-config file written into the campaign root by ``run``.
 RECORDED_CONFIG_NAME = "assystant_config.yaml"
+
+#: What the accurate statics -- the calculations that produce the training
+#: labels -- change relative to the relaxation ``incar`` when ``incar_static``
+#: says nothing: a denser k-mesh, tighter electronic and ionic convergence and
+#: reciprocal-space projection.  Identical to ``STATIC_INCAR_OVERRIDES`` in
+#: pyiron_workflow_assyst, which is what every campaign before ``incar_static``
+#: existed ran with.  ``NSW = 0`` and the absence of ``ISIF`` are not listed
+#: because they are invariants of a statics job, not settings.
+DEFAULT_INCAR_STATIC = {"KSPACING": 0.25, "EDIFF": 1e-5, "EDIFFG": 1e-4, "LREAL": False}
 
 #: Sections excluded from the staleness comparison.  ``slurm`` describes how the
 #: work reaches the scheduler (wall time, task count, partition), not what is
@@ -109,8 +122,13 @@ class SystemConfig:
     species: Any = field(default_factory=list)
     min_atoms: int = 1
     max_atoms: int = 12
-    stoich_min: int = 1
-    stoich_max: int = 12
+    #: Per-species count bounds for multi-component systems.  ``null`` (the
+    #: default) means the full composition range: ``stoich_min`` -> 1 and
+    #: ``stoich_max`` -> ``max_atoms``, so every split of every cell size in
+    #: ``[min_atoms, max_atoms]`` with each species present is scanned.  Set
+    #: either explicitly only to narrow the scan.  Unary systems ignore both.
+    stoich_min: Any = None
+    stoich_max: Any = None
     spacegroups: Any = field(default_factory=lambda: [1, 230])
     strain_min: float = 0.8
     strain_max: float = 1.2
@@ -133,6 +151,11 @@ class SystemConfig:
     @property
     def systems(self) -> list[list[str]]:
         return [list(s) for s in self.species]
+
+    @property
+    def stoich_range(self) -> tuple[int, int]:
+        """Effective ``(stoich_min, stoich_max)``: ``null`` -> ``(1, max_atoms)``."""
+        return resolve_stoich_range(self.stoich_min, self.stoich_max, self.max_atoms)
 
     @property
     def sg_min(self) -> int:
@@ -181,10 +204,71 @@ def _normalise_spacegroups(raw) -> list[int]:
     try:
         lo, hi = raw
     except (TypeError, ValueError):
-        raise ConfigError(
-            f"`system.spacegroups` must be a [min, max] pair, got {raw!r}"
-        ) from None
+        raise ConfigError(f"`system.spacegroups` must be a [min, max] pair, got {raw!r}") from None
     return [int(lo), int(hi)]
+
+
+def resolve_stoich_range(stoich_min, stoich_max, max_atoms: int) -> tuple[int, int]:
+    """``null`` stoichiometry bounds mean the full composition range.
+
+    ``stoich_min: null`` -> 1 (every species present in every cell) and
+    ``stoich_max: null`` -> ``max_atoms``.  Together with the total-atom filter
+    in :func:`enumerate_compositions` that is "for a cell of ``n`` atoms, every
+    species count from 1 to ``n - (k - 1)``" -- the whole composition range for
+    every cell size, which is what a multi-component ASSYST scan should cover
+    unless deliberately narrowed.
+    """
+    lo = 1 if stoich_min is None else int(stoich_min)
+    hi = int(max_atoms) if stoich_max is None else int(stoich_max)
+    return lo, hi
+
+
+def enumerate_compositions(
+    species,
+    min_atoms: int,
+    max_atoms: int,
+    stoich_min=None,
+    stoich_max=None,
+) -> list[tuple[int, ...]]:
+    """Composition tuples to scan for ``species``, in lexicographic order.
+
+    Unary systems enumerate cell sizes directly, ``[(n,) for n in
+    range(min_atoms, max_atoms + 1)]`` -- ``stoich_min``/``stoich_max`` do not
+    apply, because for one species the stoichiometry *is* the atom count.
+
+    Multi-component systems take every per-species count in
+    ``[stoich_min, stoich_max]`` and keep the tuples with
+    ``min_atoms <= sum(comp) <= max_atoms``.  With the defaults
+    (``None`` -> :func:`resolve_stoich_range`) that is the full composition
+    range: a binary scans ``(1, n-1) .. (n-1, 1)`` for every ``n`` from
+    ``max(min_atoms, 2)`` to ``max_atoms``, a ternary every three-way split
+    from ``n = 3`` up.
+
+    The order is lexicographic, identical to ``itertools.product`` filtered, and
+    must stay so: the per-task generation seeds are keyed on position.
+    """
+    species = list(species)
+    k = len(species)
+    if k == 0:
+        return []
+    if k == 1:
+        return [(n,) for n in range(int(min_atoms), int(max_atoms) + 1)]
+    lo, hi = resolve_stoich_range(stoich_min, stoich_max, max_atoms)
+    min_atoms, max_atoms = int(min_atoms), int(max_atoms)
+    out: list[tuple[int, ...]] = []
+
+    def walk(prefix: tuple[int, ...], total: int, remaining: int) -> None:
+        if remaining == 0:
+            if min_atoms <= total <= max_atoms:
+                out.append(prefix)
+            return
+        # Every remaining species needs at least ``lo`` more atoms.
+        budget = max_atoms - total - lo * (remaining - 1)
+        for n in range(lo, min(hi, budget) + 1):
+            walk(prefix + (n,), total + n, remaining - 1)
+
+    walk((), 0, k)
+    return out
 
 
 @dataclass
@@ -284,6 +368,11 @@ class CampaignConfig:
     root: str = ""
     system: SystemConfig = field(default_factory=SystemConfig)
     incar: dict = field(default_factory=dict)
+    #: Overrides, on top of ``incar``, for the accurate statics that produce the
+    #: training labels.  Layered over :data:`DEFAULT_INCAR_STATIC`; a tag set to
+    #: ``null`` drops the default and inherits the relaxation value.  See
+    #: :func:`effective_static_overrides`.
+    incar_static: dict = field(default_factory=dict)
     magmom: MagmomConfig = field(default_factory=MagmomConfig)
     assyst: AssystConfig = field(default_factory=AssystConfig)
     filters: FiltersConfig = field(default_factory=FiltersConfig)
@@ -299,10 +388,17 @@ class CampaignConfig:
         incar = data.get("incar") or {}
         if not isinstance(incar, dict):
             raise ConfigError("`incar` must be a mapping of INCAR tag -> value")
+        incar_static = data.get("incar_static") or {}
+        if not isinstance(incar_static, dict):
+            raise ConfigError(
+                "`incar_static` must be a mapping of INCAR tag -> value (or null to "
+                "inherit the relaxation value)"
+            )
         return cls(
             root=str(data.get("root", "") or ""),
             system=_from_section(SystemConfig, "system", data.get("system")),
             incar={str(k).upper(): v for k, v in incar.items()},
+            incar_static={str(k).upper(): v for k, v in incar_static.items()},
             magmom=_from_section(MagmomConfig, "magmom", data.get("magmom")),
             assyst=_from_section(AssystConfig, "assyst", data.get("assyst")),
             filters=_from_section(FiltersConfig, "filters", data.get("filters")),
@@ -368,15 +464,15 @@ class CampaignConfig:
                 f"`system.max_atoms` ({s.max_atoms}) must be >= `system.min_atoms` "
                 f"({s.min_atoms})"
             )
-        if s.stoich_min < 1 or s.stoich_max < s.stoich_min:
+        lo, hi = s.stoich_range
+        if lo < 1 or hi < lo:
             raise ConfigError(
                 f"`system.stoich_min`/`stoich_max` must satisfy 1 <= min <= max, "
-                f"got {s.stoich_min}/{s.stoich_max}"
+                f"got {lo}/{hi} (null means 1 / max_atoms: the full composition range)"
             )
         if not (1 <= s.sg_min <= s.sg_max <= 230):
             raise ConfigError(
-                f"`system.spacegroups` must satisfy 1 <= min <= max <= 230, "
-                f"got {s.spacegroups}"
+                f"`system.spacegroups` must satisfy 1 <= min <= max <= 230, " f"got {s.spacegroups}"
             )
         if not (0 < s.strain_min <= s.strain_max):
             raise ConfigError(
@@ -410,6 +506,7 @@ class CampaignConfig:
             )
 
         _validate_ibrion(self.incar, a.ionic_steps)
+        _validate_incar_static(self.incar_static)
 
         if f.min_dist_backend not in ("neighbor_list", "mic"):
             raise ConfigError(
@@ -440,10 +537,15 @@ class CampaignConfig:
         def sect(obj):
             return {fld.name: getattr(obj, fld.name) for fld in fields(obj)}
 
+        system = sect(self.system)
+        # Record the effective bounds, not ``null``: the file must describe the
+        # scan that was run even if a later release changes the default.
+        system["stoich_min"], system["stoich_max"] = self.system.stoich_range
         return {
             "root": self.root,
-            "system": sect(self.system),
+            "system": system,
             "incar": dict(self.incar),
+            "incar_static": dict(self.incar_static),
             "magmom": sect(self.magmom),
             "assyst": sect(self.assyst),
             "filters": sect(self.filters),
@@ -517,6 +619,46 @@ def _validate_ibrion(incar: dict, ionic_steps: int) -> None:
         )
 
 
+def _validate_incar_static(overrides: dict) -> None:
+    """Reject ``incar_static`` entries that contradict what a statics job is.
+
+    The accurate statics always run with ``NSW = 0`` and never carry ``ISIF``
+    (``run_ASSYST_on_structure`` enforces both), so an ``NSW`` other than 0 or
+    any ``ISIF`` here would be silently discarded.  Refusing is better than a
+    config that reads as though the labels were relaxed.
+    """
+    if "ISIF" in overrides:
+        raise ConfigError(
+            "`incar_static.ISIF` is not allowed: the accurate statics never relax "
+            "anything, and run_ASSYST_on_structure strips ISIF from their INCAR. "
+            "ISIF belongs in `incar`, where it seeds the ISIF7 stage."
+        )
+    nsw = overrides.get("NSW")
+    if nsw is not None and int(nsw) != 0:
+        raise ConfigError(
+            f"`incar_static.NSW` is {nsw}, but the accurate statics always run with "
+            "NSW = 0 (run_ASSYST_on_structure forces it). Remove it; the relaxation "
+            "step count is `assyst.ionic_steps`."
+        )
+
+
+def effective_static_overrides(overrides: dict | None) -> dict:
+    """The tags the statics INCAR changes relative to ``incar``.
+
+    :data:`DEFAULT_INCAR_STATIC` with ``overrides`` layered on top; a tag whose
+    value is ``None`` is removed, which is how a config says "inherit this one
+    from the relaxation INCAR" (``incar_static: {KSPACING: null}``).
+    """
+    merged = dict(DEFAULT_INCAR_STATIC)
+    for key, value in (overrides or {}).items():
+        key = str(key).upper()
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
+    return merged
+
+
 def _validate_symbols(systems) -> None:
     try:
         from pymatgen.core.periodic_table import Element
@@ -553,7 +695,51 @@ def calculation_key(dumped: dict) -> dict:
     destructive ``--from-scratch`` path after a ``--time`` bump would be worse
     than useless.
     """
-    return {k: v for k, v in dumped.items() if k not in _STALENESS_EXEMPT_SECTIONS}
+    key = {k: v for k, v in dumped.items() if k not in _STALENESS_EXEMPT_SECTIONS}
+    system = key.get("system")
+    if isinstance(system, dict):
+        key["system"] = _with_compositions(system)
+    # Compare what the statics INCAR actually changes, not how it was spelled:
+    # a config recorded before `incar_static` existed ran with exactly the
+    # defaults, and `{KSPACING: 0.25}` written out is not a change either.
+    raw = key.get("incar_static")
+    key["incar_static"] = effective_static_overrides(raw if isinstance(raw, dict) else {})
+    return key
+
+
+def _with_compositions(system: dict) -> dict:
+    """Replace ``stoich_min``/``stoich_max`` by the composition sets they imply.
+
+    What the calculation depends on is *which compositions are scanned*, not
+    the two numbers that happen to produce them.  Comparing the derived sets
+    lets a config recorded by an older release (which wrote the then-default
+    ``stoich_max: 12`` into every campaign, unary ones included) still match a
+    config that now leaves the bound ``null``, while a genuinely different scan
+    -- a binary whose ``max_atoms`` went from 12 to 20 -- is still caught, and
+    is reported as ``system.compositions.<system>``.
+    """
+    out = {k: v for k, v in system.items() if k not in ("stoich_min", "stoich_max")}
+    try:
+        systems = _normalise_species(system.get("species"))
+        min_atoms, max_atoms = int(system.get("min_atoms", 1)), int(system.get("max_atoms", 12))
+        out["compositions"] = {
+            system_name(sp): [
+                list(c)
+                for c in enumerate_compositions(
+                    sp,
+                    min_atoms,
+                    max_atoms,
+                    system.get("stoich_min"),
+                    system.get("stoich_max"),
+                )
+            ]
+            for sp in systems
+        }
+    except (ConfigError, TypeError, ValueError):
+        # Malformed section: fall back to comparing the raw numbers.
+        out["stoich_min"] = system.get("stoich_min")
+        out["stoich_max"] = system.get("stoich_max")
+    return out
 
 
 def config_differences(new: dict, recorded: dict) -> list[str]:

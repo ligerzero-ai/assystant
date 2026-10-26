@@ -75,7 +75,10 @@ structure recomputed at `ENCUT: 350` occupies the same directory, and the cache
 would hand back the `ENCUT: 300` numbers.
 
 **`slurm` is exempt from the comparison. Everything else participates** —
-`root`, `system`, `incar`, `magmom`, `assyst`, `filters`, `vasp`.
+`root`, `system`, `incar`, `magmom`, `assyst`, `filters`, `vasp`. (The
+stoichiometry bounds in `system` are compared through the composition sets
+they imply, as `system.compositions.<system>`, so the same scan written two
+ways is not a difference.)
 
 ```
 $ assystant run camp.yaml --dry-run --limit 1 --time 08:00:00

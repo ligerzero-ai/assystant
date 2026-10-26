@@ -43,6 +43,31 @@ def test_al_tutorial_is_bundled_with_the_package():
     assert template_description("Al_tutorial")
 
 
+def test_alcu_tutorial_is_three_systems_sharing_the_al_scan(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    alcu = CampaignConfig.from_dict(
+        yaml.safe_load(template_text("AlCu_tutorial"))
+    ).resolve()
+    al = CampaignConfig.from_dict(
+        yaml.safe_load(template_text("Al_tutorial"))
+    ).resolve()
+    assert alcu.system.systems == [["Al"], ["Cu"], ["Al", "Cu"]]
+    assert alcu.system_names() == ["Al", "Cu", "Al_Cu"]
+    # Same scan parameters and seed as Al_tutorial, so the Al system reproduces
+    # the worked example's hashes byte for byte.
+    for key in (
+        "min_atoms",
+        "max_atoms",
+        "spacegroups",
+        "strain_min",
+        "strain_max",
+        "seed",
+    ):
+        assert getattr(alcu.system, key) == getattr(al.system, key), key
+    assert alcu.incar == al.incar
+    assert placeholder_fields(alcu) == ["slurm.partition", "vasp.binary"]
+
+
 def test_unknown_template_names_the_available_ones():
     with pytest.raises(KeyError, match="Al_tutorial"):
         template_text("no_such_template")

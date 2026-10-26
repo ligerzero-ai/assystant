@@ -29,6 +29,7 @@ assystant collect camp.yaml -o train.pkl           # one dataframe
 | [**Overview**](docs/overview.md) | what ASSYST does, what `assystant` adds, how the three repos fit together |
 | [**Installation**](docs/installation.md) | dependencies, install order, the POTCAR config |
 | [**Worked example**](docs/worked-example.md) | a complete campaign, start to finish, that you can copy |
+| [**Several elements**](docs/multi-element.md) | many unaries, binaries and ternaries in one campaign: `species`, stoichiometry, `magmom.host`, adding elements later |
 | [**Configuration**](docs/configuration.md) | every YAML key: meaning, default, when to change it |
 | [**Commands**](docs/commands.md) | `example` / `gen` / `run` / `status` / `collect` reference |
 | [**Operations**](docs/operations.md) | content-hashed directories, the staleness guard, `--from-scratch`, smoke testing — the part that saves days |
@@ -63,7 +64,10 @@ This works from any directory on any machine: `gen` and `run --dry-run` need
 neither SLURM nor VASP, and the bundled template carries no site-specific paths.
 `gen` writes 43 POSCARs and a `manifest.csv` under `./Al_campaign/Al/`; the
 rendered job script runs the Python environment `assystant` is installed in.
-`assystant example` with no name lists the bundled templates.
+`assystant example` with no name lists the bundled templates: `AlCu_tutorial`
+is the same campaign over several elements at once — two unaries and the Al–Cu
+binary, from `species: [[Al], [Cu], [Al, Cu]]` — and is walked through in
+[`docs/multi-element.md`](docs/multi-element.md).
 
 To go further — a real `run`, then `status` and `collect` — fill in the
 `"<EDIT ...>"` placeholders in `camp.yaml` (SLURM partition, VASP binary; a real
@@ -111,6 +115,12 @@ another. See
    campaigns applied it to ISIF7 only. New ISIF5/ISIF2 data is not directly
    comparable with old datasets — see
    [behaviour changes](docs/behaviour-changes.md).
+4. **The relaxation and the labels have separate INCARs.** `incar` is the
+   relaxation; the accurate statics that produce the training data run on
+   `incar` plus [`incar_static`](docs/configuration.md#incar_static--the-incar-of-the-training-labels)
+   (by default `KSPACING 0.25`, `EDIFF 1e-5`, `EDIFFG 1e-4`, `LREAL false`), so
+   a production-grade `ENCUT` or k-mesh for the labels costs nothing in the
+   relaxation.
 
 ## Tests
 
@@ -119,7 +129,7 @@ python -m pip install "assystant[test]"
 pytest tests/ -q
 ```
 
-124 tests. None call SLURM or VASP; `submit_campaign` takes `queued_dirs` and
+126 tests. None call SLURM or VASP; `submit_campaign` takes `queued_dirs` and
 `submit_fn` injection seams for exactly that reason. For an end-to-end check that
 runs real DFT, use [`examples/Fe_smoke.yaml`](examples/Fe_smoke.yaml).
 

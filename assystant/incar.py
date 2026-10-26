@@ -9,6 +9,7 @@ from __future__ import annotations
 
 __all__ = [
     "stack_element_string",
+    "build_static_incar",
     "get_incar_magmom_string",
     "build_incar",
 ]
@@ -74,3 +75,31 @@ def build_incar(base_tags: dict, structure, magmom_cfg, system_tag: str, host: s
     else:
         incar.pop("MAGMOM", None)
     return incar
+
+
+def build_static_incar(
+    base_tags: dict,
+    static_overrides: dict,
+    structure,
+    magmom_cfg,
+    system_tag: str,
+    host: str,
+):
+    """Assemble the INCAR for the accurate statics -- the training labels.
+
+    ``base_tags`` is the campaign ``incar`` (the relaxation INCAR) and
+    ``static_overrides`` the campaign ``incar_static``; the statics INCAR is
+    the first with :func:`effective_static_overrides` of the second applied,
+    then stamped with ``SYSTEM`` and ``MAGMOM`` exactly like
+    :func:`build_incar` (so an ``ISPIN`` changed in ``incar_static`` is
+    honoured by the MAGMOM logic).  ``NSW`` is 0 and ``ISIF`` absent, which is
+    what makes it a statics INCAR; ``run_ASSYST_on_structure`` enforces the
+    same two invariants on its side.
+    """
+    from .config import effective_static_overrides
+
+    tags = {str(k).upper(): v for k, v in dict(base_tags).items()}
+    tags.update(effective_static_overrides(static_overrides))
+    tags.pop("ISIF", None)
+    tags["NSW"] = 0
+    return build_incar(tags, structure, magmom_cfg, system_tag, host)

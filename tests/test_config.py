@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 import yaml
 
@@ -154,7 +156,9 @@ def test_cli_flag_beats_yaml_which_beats_default(campaign_dict, tmp_path):
     campaign_dict["slurm"]["time"] = "12:00:00"
     path.write_text(yaml.safe_dump(campaign_dict))
     args = parser.parse_args(["run", str(path)])
-    assert CampaignConfig.from_yaml(path).resolve(overrides_from_args(args)).slurm.time == "12:00:00"
+    assert (
+        CampaignConfig.from_yaml(path).resolve(overrides_from_args(args)).slurm.time == "12:00:00"
+    )
 
     # CLI flag beats YAML.
     args = parser.parse_args(["run", str(path), "--time", "01:00:00", "--ntasks", "8"])
@@ -164,14 +168,23 @@ def test_cli_flag_beats_yaml_which_beats_default(campaign_dict, tmp_path):
 
     # An unspecified flag leaves the YAML value alone.
     args = parser.parse_args(["run", str(path), "--ntasks", "8"])
-    assert CampaignConfig.from_yaml(path).resolve(overrides_from_args(args)).slurm.time == "12:00:00"
+    assert (
+        CampaignConfig.from_yaml(path).resolve(overrides_from_args(args)).slurm.time == "12:00:00"
+    )
 
 
 def test_set_flag_reaches_arbitrary_paths(campaign_dict, tmp_path):
     path = tmp_path / "camp.yaml"
     path.write_text(yaml.safe_dump(campaign_dict))
     args = build_parser().parse_args(
-        ["run", str(path), "--set", "assyst.rattle_strain=0.02", "--set", "vasp.custodian=false"]
+        [
+            "run",
+            str(path),
+            "--set",
+            "assyst.rattle_strain=0.02",
+            "--set",
+            "vasp.custodian=false",
+        ]
     )
     cfg = CampaignConfig.from_yaml(path).resolve(overrides_from_args(args))
     assert cfg.assyst.rattle_strain == 0.02
@@ -225,3 +238,99 @@ def test_guard_refuses_changed_incar_unless_from_scratch(cfg):
 def test_guard_tolerates_slurm_change_without_from_scratch(cfg):
     guard_config(cfg)
     guard_config(cfg.resolve({"slurm.ntasks": 8, "slurm.time": "02:00:00"}))
+
+
+# -- stoichiometry defaults and the staleness key ----------------------------
+def test_unset_stoich_bounds_resolve_to_the_full_range(campaign_dict):
+    campaign_dict["system"]["species"] = ["Fe", "C"]
+    campaign_dict["system"]["max_atoms"] = 20
+    campaign_dict["system"].pop("stoich_min", None)
+    campaign_dict["system"].pop("stoich_max", None)
+    cfg = CampaignConfig.from_dict(campaign_dict).resolve()
+    assert cfg.system.stoich_range == (1, 20)
+    dumped = cfg.dump()["system"]
+    assert (dumped["stoich_min"], dumped["stoich_max"]) == (1, 20)
+    # and an override of max_atoms moves the derived bound with it
+    assert cfg.resolve({"system.max_atoms": 8}).system.stoich_range == (1, 8)
+
+
+def test_explicit_stoich_bounds_are_kept_and_validated(campaign_dict):
+    campaign_dict["system"]["species"] = ["Fe", "C"]
+    campaign_dict["system"]["stoich_max"] = 3
+    assert CampaignConfig.from_dict(campaign_dict).resolve().system.stoich_range == (
+        1,
+        3,
+    )
+    campaign_dict["system"]["stoich_min"] = 0
+    with pytest.raises(ConfigError, match="stoich_min"):
+        CampaignConfig.from_dict(campaign_dict).resolve()
+
+
+def test_staleness_key_compares_compositions_not_stoich_numbers(campaign_dict):
+    """A unary campaign recorded by an older release (stoich 1/12 written out
+    explicitly) must not read as stale now that the default is derived."""
+    campaign_dict["system"]["species"] = [["Fe"]]
+    campaign_dict["system"]["max_atoms"] = 4
+    campaign_dict["system"].pop("stoich_min", None)
+    campaign_dict["system"].pop("stoich_max", None)
+    new = CampaignConfig.from_dict(campaign_dict).resolve().dump()
+    recorded = copy.deepcopy(new)
+    recorded["system"]["stoich_min"], recorded["system"]["stoich_max"] = 1, 12
+    assert config_differences(new, recorded) == []
+
+
+def test_staleness_key_catches_a_widened_binary_scan(campaign_dict):
+    campaign_dict["system"]["species"] = ["Fe", "C"]
+    campaign_dict["system"]["max_atoms"] = 20
+    campaign_dict["system"].pop("stoich_min", None)
+    campaign_dict["system"].pop("stoich_max", None)
+    new = CampaignConfig.from_dict(campaign_dict).resolve().dump()
+    recorded = copy.deepcopy(new)
+    recorded["system"]["stoich_max"] = 12  # what 0.1.1 silently scanned
+    assert config_differences(new, recorded) == ["system.compositions.Fe_C"]
+
+
+# -- incar_static -------------------------------------------------------------
+def test_incar_static_parses_uppercased_and_round_trips(campaign_dict):
+    campaign_dict["incar_static"] = {"encut": 520, "KSPACING": None}
+    cfg = CampaignConfig.from_dict(campaign_dict).resolve()
+    assert cfg.incar_static == {"ENCUT": 520, "KSPACING": None}
+    reloaded = CampaignConfig.from_dict(yaml.safe_load(yaml.safe_dump(cfg.dump()))).resolve()
+    assert reloaded.incar_static == cfg.incar_static
+    assert cfg.resolve({"incar_static.ENCUT": 600}).incar_static["ENCUT"] == 600
+
+
+def test_incar_static_rejects_isif_and_nonzero_nsw(campaign_dict):
+    campaign_dict["incar_static"] = {"ISIF": 2}
+    with pytest.raises(ConfigError, match="incar_static.ISIF"):
+        CampaignConfig.from_dict(campaign_dict).resolve()
+    campaign_dict["incar_static"] = {"NSW": 10}
+    with pytest.raises(ConfigError, match="incar_static.NSW"):
+        CampaignConfig.from_dict(campaign_dict).resolve()
+    campaign_dict["incar_static"] = {"NSW": 0}
+    CampaignConfig.from_dict(campaign_dict).resolve()  # explicit 0 is fine
+
+
+def test_effective_static_overrides_layering():
+    from assystant.config import DEFAULT_INCAR_STATIC, effective_static_overrides
+
+    assert effective_static_overrides(None) == DEFAULT_INCAR_STATIC
+    got = effective_static_overrides({"ENCUT": 520, "KSPACING": None, "lreal": "Auto"})
+    assert got == {"ENCUT": 520, "EDIFF": 1e-5, "EDIFFG": 1e-4, "LREAL": "Auto"}
+
+
+def test_staleness_ignores_a_missing_or_spelled_out_default_incar_static(campaign_dict):
+    new = CampaignConfig.from_dict(campaign_dict).resolve().dump()
+    recorded = copy.deepcopy(new)
+    del recorded["incar_static"]  # written by 0.1.1, before the section existed
+    assert config_differences(new, recorded) == []
+    campaign_dict["incar_static"] = {"KSPACING": 0.25}  # the default, spelled out
+    spelled = CampaignConfig.from_dict(campaign_dict).resolve().dump()
+    assert config_differences(spelled, recorded) == []
+
+
+def test_staleness_catches_a_changed_label_incar(campaign_dict):
+    recorded = CampaignConfig.from_dict(campaign_dict).resolve().dump()
+    campaign_dict["incar_static"] = {"KSPACING": 0.2}
+    new = CampaignConfig.from_dict(campaign_dict).resolve().dump()
+    assert config_differences(new, recorded) == ["incar_static.KSPACING"]
