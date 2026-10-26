@@ -100,6 +100,8 @@ directory" is taken to mean "same calculation" whether or not that is true.
 
 * [`installation.md`](installation.md) — dependencies, the POTCAR config.
 * [`worked-example.md`](worked-example.md) — a complete campaign, start to finish.
+* [`multi-element.md`](multi-element.md) — several elements in one campaign:
+  many unaries, binaries and ternaries, and adding elements later.
 * [`configuration.md`](configuration.md) — every YAML key.
 * [`commands.md`](commands.md) — command reference.
 * [`operations.md`](operations.md) — the things that save you days.

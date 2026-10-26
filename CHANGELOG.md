@@ -4,7 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
-## [0.1.1] - Unreleased
+## [Unreleased]
+
+### Added
+
+- `docs/multi-element.md`: a guide to campaigns over several elements — the
+  two shapes of `system.species` (several systems vs. one multi-component
+  system), the stoichiometry scan and its size, per-system `magmom.host`
+  resolution, composition-weighted equilibrium volumes and the silent fallback
+  when an element is missing from the volume table, `--limit` across systems,
+  `status` / `collect` per system, and why an element is added as a new `root`
+  once a campaign has run. Cross-linked from the README, configuration,
+  commands, worked-example, overview and troubleshooting pages.
+- `AlCu_tutorial` bundled template (`assystant example AlCu_tutorial`): the Al
+  tutorial over `species: [[Al], [Cu], [Al, Cu]]` — two unaries and a binary —
+  with the same portability guarantees as `Al_tutorial`.
+
+## [0.1.1] - 2026-10-22
 
 ### Added
 

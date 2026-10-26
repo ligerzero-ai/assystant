@@ -52,6 +52,13 @@ The message names every changed key. **Three ways out, in order of preference:**
 
 Changing only the `slurm` section never triggers this — that section is exempt.
 
+**`at: system.species`** is the common case of a change that looks harmless: an
+element appended to a campaign that has already run. It is still option 2, not
+option 3 — `--from-scratch` would delete the finished results of every system
+in the campaign to add one that would not have touched them. Put the new
+element in its own `root` and concatenate the collected dataframes; see
+[adding an element to a campaign that has already run](multi-element.md#adding-an-element-to-a-campaign-that-has-already-run).
+
 ---
 
 ## `NoConvergedImagesError`

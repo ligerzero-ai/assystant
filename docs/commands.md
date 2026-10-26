@@ -20,8 +20,13 @@ get a working config. With no `NAME`, lists them:
 
 ```
 $ assystant example
-Al_tutorial  Unary Al tutorial campaign: 1-4 atoms, cubic spacegroups, minutes of DFT.
+AlCu_tutorial  Multi-element tutorial campaign: unary Al, unary Cu and the Al-Cu binary in one file, cubic spacegroups, minutes of DFT.
+Al_tutorial    Unary Al tutorial campaign: 1-4 atoms, cubic spacegroups, minutes of DFT.
 ```
+
+`Al_tutorial` is the campaign in [`worked-example.md`](worked-example.md);
+`AlCu_tutorial` is the same campaign over three systems and is walked through in
+[`multi-element.md`](multi-element.md).
 
 With `NAME`, prints that template to stdout, or with `-o FILE` writes it there
 (refusing to overwrite an existing file unless `--force`):

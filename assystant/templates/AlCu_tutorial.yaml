@@ -1,0 +1,79 @@
+# Multi-element tutorial campaign: unary Al, unary Cu and the Al-Cu binary in one file, cubic spacegroups, minutes of DFT.
+#
+# The companion to Al_tutorial for campaigns over several elements. Get it,
+# and run it from any directory, with
+#
+#   assystant example AlCu_tutorial -o camp.yaml
+#   assystant gen     camp.yaml --no-progress        # needs neither SLURM nor VASP
+#   assystant run     camp.yaml --dry-run --limit 1  # renders one job script; read it
+#
+# `system.species` is a list of lists: every inner list is one SYSTEM, which
+# gets its own directory under `root` and its own manifest.
+#
+#   [Al]      a unary system             -> AlCu_campaign/Al/
+#   [Cu]      another unary system       -> AlCu_campaign/Cu/
+#   [Al, Cu]  one binary system          -> AlCu_campaign/Al_Cu/
+#
+# Drop the inner brackets (`species: [Al, Cu]`) and you get ONLY the binary.
+# See docs/multi-element.md.
+#
+# `gen` and `run --dry-run` work as shipped. A real `run` (no --dry-run) needs
+# the lines marked EDIT below filled in -- it refuses to submit while any
+# "<EDIT ...>" placeholder is left -- plus a POTCAR configuration file in
+# $PYIRON_VASP_CONFIG or ~/.pyiron_vasp_config (see docs/installation.md,
+# "The POTCAR library"). Every element in `species` needs a POTCAR.
+#
+# ENCUT/PREC here are tutorial-grade, not production-grade.
+
+# Campaign directory. Relative paths resolve against the directory you run
+# `assystant` from, so run every command from the same place (or make it absolute).
+root: ./AlCu_campaign
+
+system:
+  species: [[Al], [Cu], [Al, Cu]]
+  min_atoms: 1
+  max_atoms: 4
+  stoich_min: 1            # per-species atom counts for MULTI-component systems
+  stoich_max: 3            # only; the unaries ignore both (see docs/configuration.md)
+  spacegroups: [195, 230]  # cubic only, to keep the scan small
+  strain_min: 0.9
+  strain_max: 1.1
+  seed: 20260802           # an integer here makes `gen` reproducible
+
+incar:
+  ALGO: Fast
+  EDIFF: 1.0e-4
+  ENCUT: 300
+  IBRION: 2                # REQUIRED whenever assyst.ionic_steps > 0
+  ISIF: 7
+  ISMEAR: 1
+  ISPIN: 1                 # non-magnetic, so `magmom` is never consulted here;
+                           # a magnetic multi-element campaign needs `magmom.host`
+                           # considered -- see docs/multi-element.md
+  KSPACING: 0.5            # relaxation stages only; the statics force 0.25
+  LREAL: false
+  NELM: 60
+  NSW: 50                  # never used -- assyst.ionic_steps overrides it
+  PREC: Normal
+  SIGMA: 0.2
+
+assyst:
+  ionic_steps: 20
+  n_rattle: 1
+  n_stretch: 1
+
+slurm:
+  partition: "<EDIT: your SLURM partition>"
+  ntasks: 8
+  time: "01:00:00"
+  # env: unset -> the jobs run with the Python environment `assystant` itself
+  # runs in. Set it to an environment prefix only if the compute nodes must use
+  # a different one.
+
+vasp:
+  binary: "<EDIT: absolute path to vasp_std>"
+  modules: []              # EDIT if VASP needs `module load`s, e.g. [intel/2024.0, impi/2021.11]
+  # Production campaigns drive VASP through custodian (custodian: true), which
+  # needs `custodian` importable by vasp.custodian_python. Off here so the
+  # tutorial needs nothing beyond `pip install assystant`.
+  custodian: false

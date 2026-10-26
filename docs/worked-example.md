@@ -268,4 +268,8 @@ slurm:
 which is roughly 2,700 structures per unary system, each with 16 statics. Before
 launching that, read [`operations.md`](operations.md) — particularly the sections
 on content-hashed directories and the staleness guard, which are what make a
-campaign of that size safe to resume and re-launch.
+campaign of that size safe to resume and re-launch — and
+[`multi-element.md`](multi-element.md) for what changes with more than one
+system in the file: binaries and their stoichiometry scan, `magmom.host`,
+`--limit` across systems, and why the element list should be final before the
+first `run`.

@@ -94,7 +94,9 @@ replaces the hand-maintained `submit_temp.sh` with one line per element; a
 forty-element unary campaign is one file. Symbols are validated against
 pymatgen's periodic table, and a repeated element within one system is rejected.
 Each system gets its own directory named by joining its symbols with underscores:
-`Fe`, `Fe_C`, `Fe_B_C`.
+`Fe`, `Fe_C`, `Fe_B_C`. [`multi-element.md`](multi-element.md) walks through a
+campaign with several systems, including what `--limit`, `status` and `collect`
+do with them and why an element is best added before the first `run`.
 
 **`min_atoms` / `max_atoms`** — default `1` / `12`. Inclusive bounds on the atom
 count per generated cell.
@@ -234,7 +236,10 @@ collapsed into `count*moment` terms — so `Fe Fe C Fe` with the defaults become
 default is what lets a multi-system unary campaign work in one file: with
 `species: [[La], [Ce], [Pr]]` and `host: null`, each element is its own host.
 Set it explicitly only for a multi-component campaign where one specific element
-is the matrix.
+is the matrix — and even then, putting the matrix first in each inner list
+(`[[Fe, C], [Ni, C]]`) is usually simpler, since an explicit `host` applies to
+every system in the file. See
+[`multi-element.md`](multi-element.md#magnetic-systems-magmomhost).
 
 **`host_moment` / `solute_moment`** — defaults `3.0` / `-0.5`. Initial moments in
 µB for the host and for everything else. Note that
